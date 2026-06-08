@@ -51,11 +51,12 @@ git push -u origin main
 | 项 | 填什么 |
 |----|--------|
 | Production branch | `main` |
-| Framework preset | **Next.js** |
 | Framework preset | **None**（无） |
 | Build command | `npm run build` |
-| Build output directory | `out` |
+| Build output directory | **`out`** |
 | Root directory | 留空（仓库根就是项目） |
+
+> 若 preset 仍是 Next.js 且 output 为 `.vercel/output/static`，会报 **Output directory not found**。请改成上表。
 
 6. **Environment variables**（展开高级设置，建议添加）：
 
