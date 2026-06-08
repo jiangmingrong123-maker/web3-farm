@@ -56,8 +56,19 @@ git push -u origin main
 | Build output directory | `.next`（选 Next.js 时通常自动） |
 | Root directory | 留空（仓库根就是项目） |
 
-6. **Environment variables**：现阶段可不填  
+6. **Environment variables**（展开高级设置，建议添加）：
+
+| 变量名 | 值 |
+|--------|-----|
+| `NODE_VERSION` | `20` |
+
 7. **Save and Deploy**
+
+### 若构建失败（npm error / Exit code 1）
+
+1. 确认 GitHub 上已拉取最新代码（含 `.npmrc`、`.node-version`）
+2. Cloudflare 项目 → **Settings** → **Environment variables** → 添加 `NODE_VERSION` = `20`
+3. **Deployments** → 失败的那次 → **Retry deployment**
 
 ### 若 Cloudflare 构建失败
 

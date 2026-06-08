@@ -8,9 +8,11 @@
     "start": "next start",
     "lint": "next lint"
   },
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
     "@tanstack/react-query": "^5.101.0",
-    "@wagmi/connectors": "^5.11.2",
     "next": "14.2.35",
     "next-intl": "^4.13.0",
     "react": "^18",

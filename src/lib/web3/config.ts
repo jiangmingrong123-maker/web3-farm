@@ -1,5 +1,4 @@
-import { injected } from "@wagmi/core";
-import { http, createConfig } from "wagmi";
+import { createConfig, http, injected } from "wagmi";
 import { mainnet } from "wagmi/chains";
 
 export const wagmiConfig = createConfig({
