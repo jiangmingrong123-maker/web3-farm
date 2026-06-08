@@ -4,7 +4,8 @@
     "description": "绑定 NFT，按稀有档位每日产出积分。Nobody 首个接入。"
   },
   "nav": {
-    "farm": "农场",
+    "home": "首页",
+    "farm": "展馆",
     "collections": "集合",
     "points": "积分",
     "docs": "文档"
@@ -31,7 +32,11 @@
     "previewTitle": "试算预览 · Nobody #6037",
     "previewHint": "6 属性示例，基于样本 trait 占比表",
     "collectionsTitle": "已接入集合",
-    "comingSoon": "更多集合登记中"
+    "comingSoon": "更多集合登记中",
+    "entryBadge": "SEASON 0 · 试玩",
+    "entryTitle": "进入我的展馆",
+    "entryDesc": "12 格展柜，每日领积分，解锁更多展位。NFT 绑定即将开放。",
+    "entryCta": "进入展馆"
   },
   "tier": {
     "SPECIAL": "Special · 有 special 属性",
@@ -62,5 +67,27 @@
     "claim": "领取产出",
     "claimCooldown": "每 24 小时可领取一次",
     "pointsBalance": "积分余额"
+  },
+  "hall": {
+    "seasonBadge": "SEASON 0 · 试玩积分",
+    "title": "我的展馆",
+    "subtitle": "链上私人藏馆，专属展柜陈列你的数字资产。每日产分、解锁展位，Season 0 快照决定后续空投与玩法资格。",
+    "balance": "积分余额",
+    "balanceHint": "试玩积分，Season 0 快照后可能兑换权益",
+    "claim": "每日领取",
+    "claimWait": "下次领取",
+    "connectToClaim": "连接钱包后领取",
+    "gridTitle": "展柜 · 12 格",
+    "gridHint": "解锁展位后可绑定 NFT（即将开放）",
+    "unlocked": "已解锁",
+    "slotLocked": "待解锁",
+    "slotEmpty": "空展位",
+    "bindSoon": "绑定即将开放",
+    "unlock": "解锁",
+    "pts": "分",
+    "rulesTitle": "Season 0 规则",
+    "rule1": "连接钱包后，每 24 小时可领取试玩积分",
+    "rule2": "用积分按顺序解锁展柜，共 12 格",
+    "rule3": "NFT 绑定与档位倍率将在下一版本开放"
   }
 }

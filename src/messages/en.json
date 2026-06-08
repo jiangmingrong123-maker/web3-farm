@@ -4,7 +4,8 @@
     "description": "Bind NFTs and earn daily points by rarity tier. Nobody is live first."
   },
   "nav": {
-    "farm": "Farm",
+    "home": "Home",
+    "farm": "Hall",
     "collections": "Collections",
     "points": "Points",
     "docs": "Docs"
@@ -31,7 +32,11 @@
     "previewTitle": "Preview · Nobody #6037",
     "previewHint": "6-trait example using sample rarity stats",
     "collectionsTitle": "Live collections",
-    "comingSoon": "More collections registering"
+    "comingSoon": "More collections registering",
+    "entryBadge": "SEASON 0 · TRIAL",
+    "entryTitle": "Enter My Exhibition Hall",
+    "entryDesc": "12 showcase slots, daily points, unlock more pedestals. NFT binding coming soon.",
+    "entryCta": "Enter Hall"
   },
   "tier": {
     "SPECIAL": "Special · has special trait",
@@ -62,5 +67,27 @@
     "claim": "Claim yield",
     "claimCooldown": "Claim once every 24 hours",
     "pointsBalance": "Point balance"
+  },
+  "hall": {
+    "seasonBadge": "SEASON 0 · TRIAL POINTS",
+    "title": "My Exhibition Hall",
+    "subtitle": "Your on-chain private gallery. Showcase digital assets, earn daily points, unlock slots — Season 0 snapshot gates airdrops and future gameplay.",
+    "balance": "Point balance",
+    "balanceHint": "Trial points — Season 0 snapshot may unlock perks",
+    "claim": "Daily claim",
+    "claimWait": "Next claim in",
+    "connectToClaim": "Connect wallet to claim",
+    "gridTitle": "Showcase · 12 slots",
+    "gridHint": "Unlock slots to bind NFTs (coming soon)",
+    "unlocked": "unlocked",
+    "slotLocked": "Locked",
+    "slotEmpty": "Empty slot",
+    "bindSoon": "Binding soon",
+    "unlock": "Unlock",
+    "pts": "pts",
+    "rulesTitle": "Season 0 rules",
+    "rule1": "Connect wallet, claim trial points every 24 hours",
+    "rule2": "Spend points to unlock showcase slots in order — 12 total",
+    "rule3": "NFT binding and tier multipliers arrive in the next release"
   }
 }

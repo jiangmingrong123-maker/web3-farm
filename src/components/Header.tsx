@@ -22,6 +22,12 @@ export function Header() {
             href="/"
             className={pathname === "/" ? "text-white" : "hover:text-white/90"}
           >
+            {t("home")}
+          </Link>
+          <Link
+            href="/farm"
+            className={pathname === "/farm" ? "text-white" : "hover:text-white/90"}
+          >
             {t("farm")}
           </Link>
         </nav>

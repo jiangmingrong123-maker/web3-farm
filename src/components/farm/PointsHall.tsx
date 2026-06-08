@@ -1,0 +1,170 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
+import { useAccount } from "wagmi";
+import {
+  HALL_SLOT_COUNT,
+  SEASON0_DAILY_BASE,
+  SLOT_UNLOCK_COSTS,
+} from "@/config/slots";
+import {
+  canClaim,
+  claimCooldownLeftMs,
+  loadFarmState,
+  performClaim,
+  saveFarmState,
+  unlockSlot,
+  type FarmState,
+} from "@/lib/farm-storage";
+import { ExhibitSlot, type SlotStatus } from "./ExhibitSlot";
+
+function formatCountdown(ms: number, locale: string) {
+  const h = Math.floor(ms / 3600000);
+  const m = Math.floor((ms % 3600000) / 60000);
+  if (locale === "zh") return `${h} 小时 ${m} 分`;
+  return `${h}h ${m}m`;
+}
+
+export function PointsHall({ locale }: { locale: string }) {
+  const t = useTranslations("hall");
+  const { address, isConnected } = useAccount();
+  const [state, setState] = useState<FarmState | null>(null);
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    setState(loadFarmState(address));
+  }, [address]);
+
+  useEffect(() => {
+    const id = setInterval(() => setTick((n) => n + 1), 60000);
+    return () => clearInterval(id);
+  }, []);
+
+  const persist = useCallback(
+    (next: FarmState) => {
+      setState(next);
+      if (address) saveFarmState(address, next);
+    },
+    [address],
+  );
+
+  const handleClaim = () => {
+    if (!isConnected || !address || !state) return;
+    const next = performClaim(state);
+    if (next) persist(next);
+  };
+
+  const handleUnlock = (slotIndex: number) => {
+    if (!state) return;
+    const cost = SLOT_UNLOCK_COSTS[slotIndex] ?? 0;
+    const next = unlockSlot(state, slotIndex, cost);
+    if (next) persist(next);
+  };
+
+  const ready = isConnected && state;
+  const claimable = ready && canClaim(state);
+  const cooldownMs = state ? claimCooldownLeftMs(state) : 0;
+  void tick;
+
+  function slotStatus(index: number): SlotStatus {
+    if (!state) return index === 1 ? "empty" : "locked";
+    if (index > state.unlockedSlots) return "locked";
+    if (state.boundSlots[index]) return "filled";
+    return "empty";
+  }
+
+  return (
+    <div className="space-y-8">
+      {/* hall header — 借鉴鲸探展馆：积分 + 领取 */}
+      <section className="relative overflow-hidden rounded-2xl border border-gold/20 bg-gradient-to-br from-surface via-ink to-black p-6 sm:p-8">
+        <div className="pointer-events-none absolute -right-20 -top-20 h-56 w-56 rounded-full bg-gold/10 blur-3xl" />
+        <div className="pointer-events-none absolute -bottom-16 -left-16 h-40 w-40 rounded-full bg-purple-500/10 blur-3xl" />
+
+        <div className="relative flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="mb-1 text-xs tracking-[0.2em] text-gold/70">{t("seasonBadge")}</p>
+            <h1 className="font-display text-2xl font-bold sm:text-3xl">{t("title")}</h1>
+            <p className="mt-2 max-w-md text-sm text-white/50">{t("subtitle")}</p>
+          </div>
+
+          <div className="flex flex-col items-stretch gap-3 sm:min-w-[220px]">
+            <div className="rounded-xl border border-white/10 bg-black/40 px-5 py-4 text-center">
+              <p className="text-xs text-white/40">{t("balance")}</p>
+              <p className="font-mono text-3xl font-bold text-gold">
+                {ready ? state.points : "—"}
+              </p>
+              <p className="mt-1 text-[10px] text-white/30">{t("balanceHint")}</p>
+            </div>
+
+            <button
+              type="button"
+              disabled={!claimable}
+              onClick={handleClaim}
+              className="rounded-full bg-gold px-5 py-3 text-sm font-bold text-ink transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {!isConnected
+                ? t("connectToClaim")
+                : claimable
+                  ? `${t("claim")} +${SEASON0_DAILY_BASE}`
+                  : `${t("claimWait")} ${formatCountdown(cooldownMs, locale)}`}
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {/* 12-slot exhibition grid */}
+      <section>
+        <div className="mb-4 flex items-end justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-bold">{t("gridTitle")}</h2>
+            <p className="text-sm text-white/45">{t("gridHint")}</p>
+          </div>
+          <p className="shrink-0 font-mono text-xs text-white/35">
+            {ready ? `${state.unlockedSlots}/${HALL_SLOT_COUNT}` : `0/${HALL_SLOT_COUNT}`}{" "}
+            {t("unlocked")}
+          </p>
+        </div>
+
+        <div className="rounded-2xl border border-white/8 bg-surface/40 p-4 sm:p-6">
+          <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 sm:gap-4">
+            {Array.from({ length: HALL_SLOT_COUNT }, (_, i) => {
+              const index = i + 1;
+              const status = slotStatus(index);
+              const bound = state?.boundSlots[index];
+              const nextLocked = state ? index === state.unlockedSlots + 1 : index === 2;
+              const cost = SLOT_UNLOCK_COSTS[index] ?? 0;
+              const canUnlock =
+                !!state &&
+                nextLocked &&
+                status === "locked" &&
+                state.points >= cost;
+
+              return (
+                <ExhibitSlot
+                  key={index}
+                  index={index}
+                  status={status}
+                  label={bound?.name}
+                  tier={bound?.tier}
+                  canUnlock={canUnlock}
+                  onUnlock={() => handleUnlock(index)}
+                />
+              );
+            })}
+          </div>
+        </div>
+      </section>
+
+      {/* season rules */}
+      <section className="rounded-2xl border border-white/8 bg-black/30 p-5 text-sm text-white/45">
+        <h3 className="mb-2 font-semibold text-white/70">{t("rulesTitle")}</h3>
+        <ul className="list-inside list-disc space-y-1">
+          <li>{t("rule1")}</li>
+          <li>{t("rule2")}</li>
+          <li>{t("rule3")}</li>
+        </ul>
+      </section>
+    </div>
+  );
+}
