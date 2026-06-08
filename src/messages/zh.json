@@ -1,0 +1,66 @@
+{
+  "meta": {
+    "title": "Web3 Farm · 多集合绑定产分",
+    "description": "绑定 NFT，按稀有档位每日产出积分。Nobody 首个接入。"
+  },
+  "nav": {
+    "farm": "农场",
+    "collections": "集合",
+    "points": "积分",
+    "docs": "文档"
+  },
+  "common": {
+    "connectWallet": "连接钱包",
+    "disconnect": "断开",
+    "signIn": "签名登录",
+    "signInHint": "签名不消耗 gas，仅用于验证钱包归属",
+    "connected": "已连接",
+    "wrongNetwork": "请切换到 Ethereum 主网",
+    "switchNetwork": "切换网络",
+    "language": "语言",
+    "loading": "加载中…",
+    "tbd": "待定"
+  },
+  "home": {
+    "badge": "MULTI-COLLECTION · ETH → BSC",
+    "title": "Web3 Farm",
+    "subtitle": "绑定 NFT，按稀有档位产出积分。Nobody 首个接入，更多集合即将开放。",
+    "phase": "第一期：绑定 + 日产积分 · 第二期：BSC 代币与互偷玩法",
+    "tierTitle": "档位倍率",
+    "tierSubtitle": "比例 50 : 20 : 10 : 2 : 1.5 : 1 · 日产 base 分待定",
+    "previewTitle": "试算预览 · Nobody #6037",
+    "previewHint": "6 属性示例，基于样本 trait 占比表",
+    "collectionsTitle": "已接入集合",
+    "comingSoon": "更多集合登记中"
+  },
+  "tier": {
+    "SPECIAL": "Special · 有 special 属性",
+    "TOP": "Top · 8 属性且极稀",
+    "FULL": "Full · 8 属性",
+    "RICH": "Rich · 7 属性",
+    "BASIC": "Basic · 6 属性",
+    "MINIMUM": "Minimum · 其他",
+    "multiplier": "倍率",
+    "dailyPoints": "日产积分",
+    "traitCount": "常规属性",
+    "avgRarity": "平均占比",
+    "perDay": "分/天"
+  },
+  "collection": {
+    "chain": "链",
+    "contract": "合约",
+    "standard": "标准",
+    "strategy": "策略",
+    "enabled": "已开放",
+    "disabled": "未开放"
+  },
+  "farm": {
+    "slots": "绑定位",
+    "slotEmpty": "空槽",
+    "bind": "绑定",
+    "unbind": "解绑",
+    "claim": "领取产出",
+    "claimCooldown": "每 24 小时可领取一次",
+    "pointsBalance": "积分余额"
+  }
+}

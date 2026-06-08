@@ -1,0 +1,10 @@
+[
+  { "trait_type": "background", "trait_value": "Mars", "percent": 3.43, "token_count": 343 },
+  { "trait_type": "body", "trait_value": "Red Undershirt", "percent": 6.7, "token_count": 670 },
+  { "trait_type": "earrings", "trait_value": "Silver Earrings", "percent": 5.08, "token_count": 508 },
+  { "trait_type": "face", "trait_value": "Aggressive", "percent": 10.44, "token_count": 1044 },
+  { "trait_type": "head", "trait_value": "Samurai Hair", "percent": 5.73, "token_count": 573 },
+  { "trait_type": "skin", "trait_value": "Black", "percent": 22.37, "token_count": 2237 },
+  { "trait_type": "background", "trait_value": "Sky", "percent": 4.2, "token_count": 420 },
+  { "trait_type": "background", "trait_value": "Volcano", "percent": 3.1, "token_count": 310 }
+]

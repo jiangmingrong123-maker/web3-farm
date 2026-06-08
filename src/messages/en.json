@@ -1,0 +1,66 @@
+{
+  "meta": {
+    "title": "Web3 Farm · Multi-Collection Staking",
+    "description": "Bind NFTs and earn daily points by rarity tier. Nobody is live first."
+  },
+  "nav": {
+    "farm": "Farm",
+    "collections": "Collections",
+    "points": "Points",
+    "docs": "Docs"
+  },
+  "common": {
+    "connectWallet": "Connect Wallet",
+    "disconnect": "Disconnect",
+    "signIn": "Sign In",
+    "signInHint": "Signing costs no gas — it only proves wallet ownership",
+    "connected": "Connected",
+    "wrongNetwork": "Please switch to Ethereum Mainnet",
+    "switchNetwork": "Switch Network",
+    "language": "Language",
+    "loading": "Loading…",
+    "tbd": "TBD"
+  },
+  "home": {
+    "badge": "MULTI-COLLECTION · ETH → BSC",
+    "title": "Web3 Farm",
+    "subtitle": "Bind NFTs and earn daily points by rarity tier. Nobody is first — more collections coming.",
+    "phase": "Phase 1: bind + daily points · Phase 2: BSC token & steal mechanic",
+    "tierTitle": "Tier multipliers",
+    "tierSubtitle": "Ratio 50 : 20 : 10 : 2 : 1.5 : 1 · daily base points TBD",
+    "previewTitle": "Preview · Nobody #6037",
+    "previewHint": "6-trait example using sample rarity stats",
+    "collectionsTitle": "Live collections",
+    "comingSoon": "More collections registering"
+  },
+  "tier": {
+    "SPECIAL": "Special · has special trait",
+    "TOP": "Top · 8 traits, ultra-rare avg",
+    "FULL": "Full · 8 traits",
+    "RICH": "Rich · 7 traits",
+    "BASIC": "Basic · 6 traits",
+    "MINIMUM": "Minimum · other",
+    "multiplier": "Multiplier",
+    "dailyPoints": "Daily points",
+    "traitCount": "Standard traits",
+    "avgRarity": "Avg rarity",
+    "perDay": "pts/day"
+  },
+  "collection": {
+    "chain": "Chain",
+    "contract": "Contract",
+    "standard": "Standard",
+    "strategy": "Strategy",
+    "enabled": "Live",
+    "disabled": "Disabled"
+  },
+  "farm": {
+    "slots": "Bind slots",
+    "slotEmpty": "Empty slot",
+    "bind": "Bind",
+    "unbind": "Unbind",
+    "claim": "Claim yield",
+    "claimCooldown": "Claim once every 24 hours",
+    "pointsBalance": "Point balance"
+  }
+}
