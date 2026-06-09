@@ -7,6 +7,13 @@ const API = "/api/rooms";
 const CREATOR_KEY = (id: string) => `swap_creator_${id}`;
 const LOCAL_ROOMS = "swap_local_rooms";
 
+/** localStorage fallback is for `npm run dev` only — production must use KV API. */
+function isLocalDev(): boolean {
+  if (typeof window === "undefined") return false;
+  const h = window.location.hostname;
+  return h === "localhost" || h === "127.0.0.1";
+}
+
 function getCreatorToken(roomId: string): string | null {
   if (typeof window === "undefined") return null;
   return sessionStorage.getItem(CREATOR_KEY(roomId));
@@ -14,6 +21,16 @@ function getCreatorToken(roomId: string): string | null {
 
 export function saveCreatorToken(roomId: string, token: string) {
   sessionStorage.setItem(CREATOR_KEY(roomId), token);
+}
+
+/** Drop dev-only room cache so production never reads stale local messages. */
+export function clearStaleLocalRooms() {
+  if (typeof window === "undefined" || isLocalDev()) return;
+  try {
+    localStorage.removeItem(LOCAL_ROOMS);
+  } catch {
+    /* ignore */
+  }
 }
 
 export function verifiedToApiSlot(nft: VerifiedNft, locked: boolean): ApiNftSlot {
@@ -64,10 +81,17 @@ function emptyRoom(id: string): ApiRoom {
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T | null> {
   try {
-    const res = await fetch(path, {
+    const isGet = !init?.method || init.method === "GET";
+    const url = isGet
+      ? `${path}${path.includes("?") ? "&" : "?"}_=${Date.now()}`
+      : path;
+
+    const res = await fetch(url, {
       ...init,
+      cache: "no-store",
       headers: {
         "Content-Type": "application/json",
+        "Cache-Control": "no-cache",
         ...init?.headers,
       },
     });
@@ -91,6 +115,7 @@ async function roomActionApi(
     body: JSON.stringify({ action, ...opts, creatorToken }),
   });
   if (remote) return remote;
+  if (!isLocalDev()) return null;
 
   const all = localLoad();
   const entry = all[roomId];
@@ -142,6 +167,9 @@ export async function createRoomApi(): Promise<CreateRoomResponse> {
     saveCreatorToken(remote.id, remote.creatorToken);
     return remote;
   }
+  if (!isLocalDev()) {
+    throw new Error("API_UNAVAILABLE");
+  }
 
   const id = crypto.randomUUID().slice(0, 8);
   const creatorToken = crypto.randomUUID().replace(/-/g, "");
@@ -153,9 +181,20 @@ export async function createRoomApi(): Promise<CreateRoomResponse> {
   return { id, creatorToken, room };
 }
 
+export async function fetchMessagesApi(
+  roomId: string,
+  since = 0,
+): Promise<ChatMessage[]> {
+  const remote = await apiFetch<ChatMessage[]>(
+    `${API}/${roomId}/messages?since=${since}`,
+  );
+  return remote ?? [];
+}
+
 export async function fetchRoomApi(roomId: string): Promise<ApiRoom | null> {
   const remote = await apiFetch<ApiRoom>(`${API}/${roomId}`);
   if (remote) return remote;
+  if (!isLocalDev()) return null;
   const all = localLoad();
   const entry = all[roomId];
   if (!entry) return null;
@@ -176,6 +215,7 @@ export async function updatePartyApi(
     body: JSON.stringify({ side, patch, address: opts?.address, creatorToken }),
   });
   if (remote) return remote;
+  if (!isLocalDev()) return null;
 
   const all = localLoad();
   const entry = all[roomId];
@@ -209,6 +249,7 @@ export async function sendMessageApi(
     body: JSON.stringify({ text, nickname, address: opts?.address, creatorToken }),
   });
   if (remote) return remote;
+  if (!isLocalDev()) return null;
 
   const all = localLoad();
   const entry = all[roomId];
@@ -236,6 +277,7 @@ export async function setChainOrderIdApi(
     body: JSON.stringify({ chainOrderId, creatorToken: token }),
   });
   if (remote) return remote;
+  if (!isLocalDev()) return null;
 
   const all = localLoad();
   const entry = all[roomId];

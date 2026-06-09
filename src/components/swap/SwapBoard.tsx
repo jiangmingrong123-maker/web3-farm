@@ -8,7 +8,9 @@ import type { VerifiedNft } from "@/lib/nft/verify";
 import type { ApiRoom } from "@/lib/swap/api-types";
 import {
   counterSide,
+  clearStaleLocalRooms,
   createRoomApi,
+  fetchMessagesApi,
   fetchRoomApi,
   getParty,
   markSwapExecutedApi,
@@ -17,6 +19,7 @@ import {
   updatePartyApi,
   verifiedToApiSlot,
 } from "@/lib/swap/api";
+import { mergeRooms } from "@/lib/swap/merge-room";
 import { useSwapExecute } from "@/lib/swap/use-swap-execute";
 import { useSwapOrderStatus } from "@/lib/swap/use-swap-order-status";
 import { AddNftPanel } from "./AddNftPanel";
@@ -45,8 +48,22 @@ export function SwapBoard({ initialRoomId }: { initialRoomId?: string }) {
   const theirSide = mySide ? counterSide(mySide) : null;
 
   const refresh = useCallback(async (id: string) => {
-    const data = await fetchRoomApi(id);
-    if (data) setRoom(data);
+    const [data, msgs] = await Promise.all([
+      fetchRoomApi(id),
+      fetchMessagesApi(id, 0),
+    ]);
+    setRoom((prev) => {
+      let next = data ? mergeRooms(prev, data) : prev;
+      if (!next) return next;
+      if (msgs.length > 0) {
+        next = mergeRooms(next, { ...next, messages: msgs });
+      }
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    clearStaleLocalRooms();
   }, []);
 
   useEffect(() => {

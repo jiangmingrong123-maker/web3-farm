@@ -48,6 +48,15 @@ interface Env {
 
 const memory = new Map<string, StoredRoom>();
 
+const NO_CACHE = {
+  "Content-Type": "application/json",
+  "Cache-Control": "no-store, no-cache, must-revalidate",
+};
+
+function json(data: unknown, status = 200) {
+  return new Response(JSON.stringify(data), { status, headers: NO_CACHE });
+}
+
 function emptyParty(): ApiParty {
   return { address: null, slots: [null, null, null, null], confirmed: false };
 }
@@ -153,7 +162,7 @@ export const onRequest = async (context: {
     const creatorToken = crypto.randomUUID().replace(/-/g, "");
     const room = emptyRoom(id, creatorToken);
     await saveRoom(env, room);
-    return Response.json({ id, creatorToken, room: publicRoom(room) });
+    return json({ id, creatorToken, room: publicRoom(room) });
   }
 
   const roomId = path[0];
@@ -165,7 +174,7 @@ export const onRequest = async (context: {
 
     if (method === "GET") {
       const since = Number(url.searchParams.get("since") ?? 0);
-      return Response.json(room.messages.filter((m) => m.at > since));
+      return json(room.messages.filter((m) => m.at > since));
     }
 
     if (method === "POST") {
@@ -189,7 +198,7 @@ export const onRequest = async (context: {
       room.messages.push(msg);
       if (room.messages.length > 200) room.messages = room.messages.slice(-200);
       await saveRoom(env, room);
-      return Response.json(msg);
+      return json(msg);
     }
 
     return new Response("Method not allowed", { status: 405 });
@@ -198,7 +207,7 @@ export const onRequest = async (context: {
   if (method === "GET" && path.length === 1) {
     const room = await loadRoom(env, roomId);
     if (!room) return new Response("Room not found", { status: 404 });
-    return Response.json(publicRoom(room));
+    return json(publicRoom(room));
   }
 
   if (method === "PATCH" && path.length === 1) {
@@ -223,7 +232,7 @@ export const onRequest = async (context: {
         room.depositedBy = body.side;
       }
       await saveRoom(env, room);
-      return Response.json(publicRoom(room));
+      return json(publicRoom(room));
     }
 
     if (body.action === "swapExecuted") {
@@ -231,7 +240,7 @@ export const onRequest = async (context: {
       room.swapDeadlineAt = null;
       room.depositedBy = null;
       await saveRoom(env, room);
-      return Response.json(publicRoom(room));
+      return json(publicRoom(room));
     }
 
     if (body.action === "swapReset") {
@@ -241,7 +250,7 @@ export const onRequest = async (context: {
       room.chainOrderId = null;
       unlockParties(room);
       await saveRoom(env, room);
-      return Response.json(publicRoom(room));
+      return json(publicRoom(room));
     }
 
     if (body.chainOrderId) {
@@ -250,7 +259,7 @@ export const onRequest = async (context: {
       }
       room.chainOrderId = body.chainOrderId;
       await saveRoom(env, room);
-      return Response.json(publicRoom(room));
+      return json(publicRoom(room));
     }
 
     if (!body.side || !body.patch) {
@@ -283,7 +292,7 @@ export const onRequest = async (context: {
     }
 
     await saveRoom(env, room);
-    return Response.json(publicRoom(room));
+    return json(publicRoom(room));
   }
 
   return new Response("Not found", { status: 404 });
