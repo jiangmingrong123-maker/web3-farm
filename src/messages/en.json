@@ -161,7 +161,8 @@
     "flow5": "Atomic swap when both deposit; 10-minute countdown after first deposit, reclaim on timeout",
     "errNotWhitelisted": "Contract not whitelisted",
     "errInvalidToken": "Invalid token ID",
-    "errNotOwner": "You do not own this NFT",
+    "errNotOwner": "This NFT is not in the connected wallet — switch account",
+    "verifyWallet": "Verifying wallet",
     "errRpc": "RPC error — try again",
     "errNotFound": "NFT not found on-chain"
   }

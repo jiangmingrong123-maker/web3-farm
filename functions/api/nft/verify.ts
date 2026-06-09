@@ -101,6 +101,16 @@ async function ethCall(to: string, data: string): Promise<string> {
   throw lastError ?? new Error("RPC_FAILED");
 }
 
+export async function onRequestOptions() {
+  return new Response(null, {
+    headers: {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type",
+    },
+  });
+}
+
 export async function onRequestPost(context: { request: Request }) {
   let body: { contract?: string; tokenId?: string; wallet?: string };
   try {

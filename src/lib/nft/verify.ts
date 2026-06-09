@@ -1,8 +1,6 @@
-import { getCollectionByContract } from "@/config/collections";
 import { isWhitelistedContract } from "@/config/swap";
-import { createPublicClient, http, type Address } from "viem";
-import { mainnet } from "viem/chains";
-import { erc721Abi } from "./abi";
+import type { Address } from "viem";
+import { nftProxyImageUrl } from "./proxy-image";
 
 export interface VerifiedNft {
   contract: `0x${string}`;
@@ -24,14 +22,12 @@ export type VerifyNftError =
   | "RPC_ERROR"
   | "NOT_FOUND";
 
-/** Browser-friendly mainnet RPC (default viem URL often fails CORS in the client). */
-const MAINNET_RPC =
-  process.env.NEXT_PUBLIC_ETH_RPC_URL ?? "https://ethereum.publicnode.com";
-
-const client = createPublicClient({
-  chain: mainnet,
-  transport: http(MAINNET_RPC, { timeout: 30_000 }),
-});
+function verifyApiUrl(): string {
+  if (typeof window !== "undefined") {
+    return `${window.location.origin}/api/nft/verify`;
+  }
+  return "/api/nft/verify";
+}
 
 type ApiVerifyResponse =
   | {
@@ -57,7 +53,7 @@ async function verifyViaApiOnce(
   | null
 > {
   try {
-    const res = await fetch("/api/nft/verify", {
+    const res = await fetch(verifyApiUrl(), {
       method: "POST",
       cache: "no-store",
       headers: {
@@ -70,9 +66,18 @@ async function verifyViaApiOnce(
         wallet: walletAddress,
       }),
     });
-    if (!res.ok) return null;
-    const data = (await res.json()) as ApiVerifyResponse;
-    if (!data.ok) return { ok: false, error: data.error };
+    let data: ApiVerifyResponse;
+    try {
+      data = (await res.json()) as ApiVerifyResponse;
+    } catch {
+      return { ok: false, error: "RPC_ERROR" };
+    }
+    if (!res.ok || !data.ok) {
+      return { ok: false, error: data.ok ? "RPC_ERROR" : data.error };
+    }
+    const imageUrl =
+      data.nft.imageUrl ??
+      nftProxyImageUrl(data.nft.contract, data.nft.tokenId);
     return {
       ok: true,
       nft: {
@@ -80,6 +85,7 @@ async function verifyViaApiOnce(
         contract: data.nft.contract as `0x${string}`,
         tokenId: BigInt(data.nft.tokenId),
         owner: data.nft.owner as Address,
+        imageUrl,
         verified: true,
       },
     };
@@ -126,60 +132,5 @@ export async function verifyNftOwnership(
     return { ok: false, error: "INVALID_TOKEN_ID" };
   }
 
-  const apiResult = await verifyViaApi(normalized, tokenIdInput, walletAddress);
-  if (apiResult.ok) return apiResult;
-  if (apiResult.error !== "RPC_ERROR") return apiResult;
-
-  const collection = getCollectionByContract(normalized);
-  const contract = normalized as `0x${string}`;
-
-  try {
-    const owner = await client.readContract({
-      address: contract,
-      abi: erc721Abi,
-      functionName: "ownerOf",
-      args: [tokenId],
-    });
-
-    if (owner.toLowerCase() !== walletAddress.toLowerCase()) {
-      return { ok: false, error: "NOT_OWNER" };
-    }
-
-    let tokenUri: string | null = null;
-    try {
-      tokenUri = await client.readContract({
-        address: contract,
-        abi: erc721Abi,
-        functionName: "tokenURI",
-        args: [tokenId],
-      });
-    } catch {
-      tokenUri = null;
-    }
-
-    return {
-      ok: true,
-      nft: {
-        contract,
-        tokenId,
-        owner,
-        collectionName: collection?.name ?? "Unknown",
-        collectionSlug: collection?.slug ?? "unknown",
-        chainId: collection?.chainId ?? 1,
-        tokenUri,
-        imageUrl: null,
-        verified: true,
-      },
-    };
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    if (
-      msg.includes("revert") ||
-      msg.includes("ERC721") ||
-      msg.includes("nonexistent")
-    ) {
-      return { ok: false, error: "NOT_FOUND" };
-    }
-    return { ok: false, error: "RPC_ERROR" };
-  }
+  return verifyViaApi(normalized, tokenIdInput, walletAddress);
 }

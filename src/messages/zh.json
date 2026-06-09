@@ -161,7 +161,8 @@
     "flow5": "双方都存入后原子互转；一方存入后 10 分钟倒计时，超时未成交自动取消可取回",
     "errNotWhitelisted": "该合约不在白名单，无法交换",
     "errInvalidToken": "Token ID 无效",
-    "errNotOwner": "该 NFT 不属于当前钱包",
+    "errNotOwner": "该 NFT 不属于当前连接的钱包，请切换账户",
+    "verifyWallet": "验真钱包",
     "errRpc": "网络繁忙，请稍等后重试（已自动重试 3 次）",
     "errNotFound": "链上未找到该 NFT"
   }

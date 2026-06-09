@@ -95,6 +95,12 @@ export function AddNftPanel({ onAdded, onCancel }: AddNftPanelProps) {
           </p>
         )}
 
+        {isConnected && address && (
+          <p className="text-[10px] text-white/35">
+            {t("verifyWallet")}: {address.slice(0, 6)}…{address.slice(-4)}
+          </p>
+        )}
+
         <p className="text-[11px] leading-relaxed text-white/35">{t("verifyHint")}</p>
 
         {error && (
