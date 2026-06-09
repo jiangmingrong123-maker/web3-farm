@@ -30,6 +30,12 @@ export function Header() {
           >
             {t("farm")}
           </Link>
+          <Link
+            href="/swap"
+            className={pathname === "/swap" ? "text-white" : "hover:text-white/90"}
+          >
+            {t("swap")}
+          </Link>
         </nav>
 
         <div className="flex items-center gap-3">

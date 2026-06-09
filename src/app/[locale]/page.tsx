@@ -2,6 +2,7 @@ import { getTranslations, setRequestLocale } from "next-intl/server";
 import { COLLECTIONS } from "@/config/collections";
 import { CollectionCard } from "@/components/CollectionCard";
 import { FarmEntryCard } from "@/components/home/FarmEntryCard";
+import { SwapEntryCard } from "@/components/home/SwapEntryCard";
 import { TierPreviewCard } from "@/components/TierPreviewCard";
 import { TierTable } from "@/components/TierTable";
 import { evaluateRarity } from "@/lib/rarity/engine";
@@ -40,7 +41,10 @@ export default async function HomePage({
         <p className="mt-3 text-xs text-white/35">{t("phase")}</p>
       </section>
 
-      <FarmEntryCard />
+      <div className="grid gap-4 sm:grid-cols-2">
+        <FarmEntryCard />
+        <SwapEntryCard />
+      </div>
 
       <section className="grid gap-6 lg:grid-cols-2">
         <div>

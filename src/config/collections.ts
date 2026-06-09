@@ -30,3 +30,11 @@ export const COLLECTIONS: CollectionConfig[] = [NOBODY_COLLECTION];
 export function getCollection(slug: string): CollectionConfig | undefined {
   return COLLECTIONS.find((c) => c.slug === slug);
 }
+
+export function getCollectionByContract(
+  address: string,
+): CollectionConfig | undefined {
+  return COLLECTIONS.find(
+    (c) => c.contractAddress.toLowerCase() === address.toLowerCase(),
+  );
+}
