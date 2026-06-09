@@ -10,9 +10,10 @@ interface ChatPanelProps {
   messages: ChatMessage[];
   address?: string;
   nickname?: string;
+  onSent?: () => void;
 }
 
-export function ChatPanel({ roomId, messages, address, nickname }: ChatPanelProps) {
+export function ChatPanel({ roomId, messages, address, nickname, onSent }: ChatPanelProps) {
   const t = useTranslations("swap");
   const [text, setText] = useState("");
   const [name, setName] = useState(nickname ?? "");
@@ -29,6 +30,7 @@ export function ChatPanel({ roomId, messages, address, nickname }: ChatPanelProp
     setSending(true);
     await sendMessageApi(roomId, trimmed, name || t("guestName"), { address });
     setText("");
+    onSent?.();
     setSending(false);
   };
 

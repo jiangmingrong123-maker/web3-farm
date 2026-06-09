@@ -180,11 +180,14 @@ export async function setChainOrderIdApi(
   return room;
 }
 
+const GUEST_SIDE_KEY = (roomId: string) => `swap_guest_${roomId}`;
+
 /** Resolve which side the current user controls. */
 export function resolveMySide(
   room: ApiRoom,
   address: string | undefined,
   creatorToken: string | null,
+  roomId?: string,
 ): "A" | "B" | null {
   if (address) {
     if (room.sideA.address?.toLowerCase() === address.toLowerCase()) return "A";
@@ -193,6 +196,13 @@ export function resolveMySide(
     if (!room.sideB.address) return "B";
   }
   if (creatorToken) return "A";
+  // Opened shared link without wallet → guest is side B (view + chat)
+  if (roomId && typeof window !== "undefined") {
+    const stored = sessionStorage.getItem(GUEST_SIDE_KEY(roomId));
+    if (stored === "B") return "B";
+    sessionStorage.setItem(GUEST_SIDE_KEY(roomId), "B");
+    return "B";
+  }
   return null;
 }
 

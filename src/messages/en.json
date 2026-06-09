@@ -124,6 +124,7 @@
     "chatPlaceholder": "Type a message…",
     "chatSend": "Send",
     "guestName": "Guest",
+    "chatWithoutWallet": "Chat works without a wallet. Connect only to add NFTs or execute the swap.",
     "addNft": "Add NFT",
     "addNftTitle": "Add item (on-chain verify)",
     "selectCollection": "Collection (whitelisted contract)",

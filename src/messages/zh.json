@@ -124,6 +124,7 @@
     "chatPlaceholder": "输入消息…",
     "chatSend": "发送",
     "guestName": "访客",
+    "chatWithoutWallet": "无需连接钱包即可聊天；放入 NFT 和确认成交时才需要钱包。",
     "addNft": "放入 NFT",
     "addNftTitle": "添加藏品（链上验真）",
     "selectCollection": "选择集合（白名单合约）",

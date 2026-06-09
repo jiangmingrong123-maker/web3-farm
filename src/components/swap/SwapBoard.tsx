@@ -36,7 +36,7 @@ export function SwapBoard({ initialRoomId }: { initialRoomId?: string }) {
   const [creating, setCreating] = useState(false);
 
   const creatorToken = roomId ? getCreatorTokenFromStorage(roomId) : null;
-  const mySide = room ? resolveMySide(room, address, creatorToken) : null;
+  const mySide = room ? resolveMySide(room, address, creatorToken, roomId) : null;
   const theirSide = mySide ? counterSide(mySide) : null;
 
   const refresh = useCallback(async (id: string) => {
@@ -315,10 +315,19 @@ export function SwapBoard({ initialRoomId }: { initialRoomId?: string }) {
             </div>
           )}
 
+        </>
+      )}
+
+      {room && roomId && (
+        <>
+          {!isConnected && (
+            <p className="text-xs text-white/40">{t("chatWithoutWallet")}</p>
+          )}
           <ChatPanel
             roomId={roomId}
             messages={room.messages}
             address={address}
+            onSent={() => refresh(roomId)}
           />
         </>
       )}
