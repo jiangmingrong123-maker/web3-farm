@@ -6,7 +6,12 @@ import { SWAP_ESCROW_ADDRESS, SWAP_ESCROW_ENABLED } from "@/config/swap";
 import type { ApiParty, ApiRoom } from "./api-types";
 import type { SwapOrderStatus } from "./use-swap-order-status";
 import { swapEscrowAbi, type NftItemInput } from "./escrow-abi";
-import { setChainOrderIdApi } from "./api";
+import {
+  markDepositStartedApi,
+  markSwapExecutedApi,
+  markSwapResetApi,
+  setChainOrderIdApi,
+} from "./api";
 
 function partyToItems(party: ApiParty): NftItemInput[] {
   return party.slots
@@ -47,13 +52,11 @@ export function useSwapExecute(
       setError("NO_COUNTERPARTY");
       return null;
     }
-    const makerItems = partyToItems(room.sideA);
-    const takerItems = partyToItems(room.sideB);
     const sim = await publicClient.simulateContract({
       address: SWAP_ESCROW_ADDRESS,
       abi: swapEscrowAbi,
       functionName: "createOrder",
-      args: [taker, makerItems, takerItems],
+      args: [taker, partyToItems(room.sideA), partyToItems(room.sideB)],
       account: address,
     });
     const orderId = sim.result as `0x${string}`;
@@ -69,6 +72,11 @@ export function useSwapExecute(
     setPending(true);
     setError(null);
     try {
+      if (mySide === "B" && !room.chainOrderId) {
+        setError("WAIT_MAKER");
+        return;
+      }
+
       let orderId = await getOrderId();
       if (!orderId && mySide === "A") {
         orderId = await createOrder();
@@ -86,7 +94,21 @@ export function useSwapExecute(
         account: address,
       });
       const hash = await writeContractAsync(sim.request);
-      await publicClient.waitForTransactionReceipt({ hash });
+      const receipt = await publicClient.waitForTransactionReceipt({ hash });
+
+      await markDepositStartedApi(room.id, mySide, { address });
+
+      const o = await publicClient.readContract({
+        address: SWAP_ESCROW_ADDRESS,
+        abi: swapEscrowAbi,
+        functionName: "orders",
+        args: [orderId],
+      });
+      if (o[6]) {
+        await markSwapExecutedApi(room.id);
+      }
+
+      void receipt;
       onChainUpdate?.();
     } catch {
       setError("TX_FAILED");
@@ -107,7 +129,11 @@ export function useSwapExecute(
   const withdraw = useCallback(async () => {
     if (!room || !mySide || !address || !publicClient) return;
     const orderId = await getOrderId();
-    if (!orderId) return;
+    if (!orderId) {
+      await markSwapResetApi(room.id);
+      onChainUpdate?.();
+      return;
+    }
     setPending(true);
     setError(null);
     try {
@@ -120,6 +146,7 @@ export function useSwapExecute(
       });
       const hash = await writeContractAsync(sim.request);
       await publicClient.waitForTransactionReceipt({ hash });
+      await markSwapResetApi(room.id);
       onChainUpdate?.();
     } catch {
       setError("TX_FAILED");
@@ -140,8 +167,7 @@ export function useSwapExecute(
     !orderStatus.myDeposited &&
     !orderStatus.executed &&
     !orderStatus.expired &&
-    (mySide === "B" ? !!room.sideA.address : true) &&
-    (!swapInProgress || !orderStatus.myDeposited);
+    (mySide === "A" || !!room.chainOrderId);
 
   const canWithdraw =
     SWAP_ESCROW_ENABLED &&

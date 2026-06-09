@@ -9,11 +9,8 @@ export interface SwapOrderStatus {
   makerDeposited: boolean;
   takerDeposited: boolean;
   executed: boolean;
-  /** Unix sec — when the solo depositor put NFTs in */
   soloDepositAt: number;
-  /** One side deposited, waiting for the other */
   awaitingCounterparty: boolean;
-  /** Seconds left until timeout (0 = expired) */
   remainingSec: number;
   expired: boolean;
   myDeposited: boolean;
@@ -34,6 +31,9 @@ export function useSwapOrderStatus(
   orderId: string | null | undefined,
   mySide: "A" | "B" | null,
   tick: number,
+  kvDeadlineAt?: number | null,
+  kvDepositedBy?: "A" | "B" | null,
+  kvExecuted?: boolean,
 ) {
   const publicClient = usePublicClient();
   const [raw, setRaw] = useState<{
@@ -76,36 +76,60 @@ export function useSwapOrderStatus(
 
   void tick;
 
-  if (!raw || !mySide) return EMPTY;
+  if (!mySide) return EMPTY;
 
-  const makerOnly = raw.makerDeposited && !raw.takerDeposited;
-  const takerOnly = raw.takerDeposited && !raw.makerDeposited;
-  const awaitingCounterparty = (makerOnly || takerOnly) && !raw.executed;
-
-  let soloDepositAt = 0;
-  if (makerOnly && raw.makerDepositAt > BigInt(0)) {
-    soloDepositAt = Number(raw.makerDepositAt);
-  } else if (takerOnly && raw.takerDepositAt > BigInt(0)) {
-    soloDepositAt = Number(raw.takerDepositAt);
+  if (kvExecuted) {
+    return { ...EMPTY, executed: true };
   }
 
-  const deadlineMs = soloDepositAt * 1000 + WITHDRAW_TIMEOUT_SEC * 1000;
-  const remainingSec = awaitingCounterparty
-    ? Math.max(0, Math.ceil((deadlineMs - Date.now()) / 1000))
-    : 0;
-  const expired = awaitingCounterparty && remainingSec === 0;
+  if (raw) {
+    const makerOnly = raw.makerDeposited && !raw.takerDeposited;
+    const takerOnly = raw.takerDeposited && !raw.makerDeposited;
+    const awaitingCounterparty = (makerOnly || takerOnly) && !raw.executed;
 
-  const myDeposited =
-    mySide === "A" ? raw.makerDeposited : raw.takerDeposited;
+    let soloDepositAt = 0;
+    if (makerOnly && raw.makerDepositAt > BigInt(0)) {
+      soloDepositAt = Number(raw.makerDepositAt);
+    } else if (takerOnly && raw.takerDepositAt > BigInt(0)) {
+      soloDepositAt = Number(raw.takerDepositAt);
+    }
 
-  return {
-    makerDeposited: raw.makerDeposited,
-    takerDeposited: raw.takerDeposited,
-    executed: raw.executed,
-    soloDepositAt,
-    awaitingCounterparty,
-    remainingSec,
-    expired,
-    myDeposited,
-  };
+    const deadlineMs = soloDepositAt * 1000 + WITHDRAW_TIMEOUT_SEC * 1000;
+    const remainingSec = awaitingCounterparty
+      ? Math.max(0, Math.ceil((deadlineMs - Date.now()) / 1000))
+      : 0;
+    const expired = awaitingCounterparty && remainingSec === 0;
+    const myDeposited =
+      mySide === "A" ? raw.makerDeposited : raw.takerDeposited;
+
+    return {
+      makerDeposited: raw.makerDeposited,
+      takerDeposited: raw.takerDeposited,
+      executed: raw.executed,
+      soloDepositAt,
+      awaitingCounterparty,
+      remainingSec,
+      expired,
+      myDeposited,
+    };
+  }
+
+  if (kvDeadlineAt && kvDepositedBy) {
+    const myDeposited = kvDepositedBy === mySide;
+    const awaitingCounterparty = !kvExecuted;
+    const remainingSec = Math.max(0, Math.ceil((kvDeadlineAt - Date.now()) / 1000));
+    const expired = awaitingCounterparty && remainingSec === 0;
+    return {
+      makerDeposited: kvDepositedBy === "A",
+      takerDeposited: kvDepositedBy === "B",
+      executed: false,
+      soloDepositAt: Math.floor((kvDeadlineAt - WITHDRAW_TIMEOUT_SEC * 1000) / 1000),
+      awaitingCounterparty: awaitingCounterparty && !expired,
+      remainingSec: expired ? 0 : remainingSec,
+      expired,
+      myDeposited,
+    };
+  }
+
+  return EMPTY;
 }

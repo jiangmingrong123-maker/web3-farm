@@ -76,5 +76,7 @@ export interface NftItemInput {
   tokenId: bigint;
 }
 
-/** 10 minutes — must match contract WITHDRAW_TIMEOUT */
-export const WITHDRAW_TIMEOUT_SEC = 10 * 60;
+import { SWAP_TIMEOUT_MS } from "./constants";
+
+/** Must match contract WITHDRAW_TIMEOUT */
+export const WITHDRAW_TIMEOUT_SEC = SWAP_TIMEOUT_MS / 1000;

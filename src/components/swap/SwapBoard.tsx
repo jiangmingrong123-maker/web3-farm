@@ -11,6 +11,7 @@ import {
   createRoomApi,
   fetchRoomApi,
   getParty,
+  markSwapExecutedApi,
   resolveMySide,
   saveCreatorToken,
   updatePartyApi,
@@ -116,7 +117,20 @@ export function SwapBoard({ initialRoomId }: { initialRoomId?: string }) {
     setAddingSlot(null);
   };
 
-  const orderStatus = useSwapOrderStatus(room?.chainOrderId, mySide, tick);
+  const orderStatus = useSwapOrderStatus(
+    room?.chainOrderId,
+    mySide,
+    tick,
+    room?.swapDeadlineAt,
+    room?.depositedBy,
+    room?.status === "executed",
+  );
+
+  useEffect(() => {
+    if (orderStatus.executed && room && room.status !== "executed" && roomId) {
+      markSwapExecutedApi(roomId).then((updated) => updated && setRoom(updated));
+    }
+  }, [orderStatus.executed, room, roomId]);
 
   const onChainUpdate = useCallback(() => {
     setOrderTick((n) => n + 1);
@@ -241,7 +255,13 @@ export function SwapBoard({ initialRoomId }: { initialRoomId?: string }) {
         </p>
       )}
 
-      {room && myParty && (
+          {room?.status === "cancelled" && (
+            <p className="rounded-xl border border-white/15 bg-white/5 py-3 text-center text-xs text-white/50">
+              {t("swapCancelled")}
+            </p>
+          )}
+
+          {room && myParty && (
         <>
           <div className="grid gap-6 lg:grid-cols-2">
             <section className="rounded-2xl border border-gold/25 bg-black/30 p-4">
@@ -357,7 +377,11 @@ export function SwapBoard({ initialRoomId }: { initialRoomId?: string }) {
                     : t("depositNfts")}
               </button>
               {chainError && (
-                <p className="mt-2 text-xs text-red-400">{t("executeFailed")}</p>
+                <p className="mt-2 text-xs text-red-400">
+                  {chainError === "WAIT_MAKER"
+                    ? t("waitMakerFirst")
+                    : t("executeFailed")}
+                </p>
               )}
             </div>
           )}

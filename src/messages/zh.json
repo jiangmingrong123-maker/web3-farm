@@ -128,6 +128,8 @@
     "depositDone": "已存入 · 等待对方",
     "withdrawNfts": "取回我的 NFT",
     "swapCompleted": "交换已完成 · NFT 已互转",
+    "waitMakerFirst": "请等待对方（房间创建方）先完成链上存入",
+    "swapCancelled": "交易已取消，可重新放入 NFT 并确认",
     "executing": "交易确认中…",
     "executeFailed": "链上交易失败，请检查授权与网络",
     "chatTitle": "房间聊天",

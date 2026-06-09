@@ -29,7 +29,10 @@ export interface ApiRoom {
   sideB: ApiParty;
   messages: ChatMessage[];
   chainOrderId: string | null;
-  status: "open" | "both_confirmed" | "executed";
+  status: "open" | "both_confirmed" | "executed" | "cancelled";
+  /** Unix ms — countdown end when one side deposited */
+  swapDeadlineAt: number | null;
+  depositedBy: "A" | "B" | null;
 }
 
 export interface CreateRoomResponse {

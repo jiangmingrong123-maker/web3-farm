@@ -128,6 +128,8 @@
     "depositDone": "Deposited · waiting",
     "withdrawNfts": "Reclaim my NFTs",
     "swapCompleted": "Swap complete · NFTs transferred",
+    "waitMakerFirst": "Wait for the room creator to deposit on-chain first",
+    "swapCancelled": "Swap cancelled — you can place NFTs and confirm again",
     "executing": "Confirming tx…",
     "executeFailed": "Transaction failed — check approvals and network",
     "chatTitle": "Room chat",

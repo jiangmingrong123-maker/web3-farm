@@ -1,7 +1,10 @@
 /**
  * Cloudflare Pages Function — swap room API + chat.
- * Bind KV namespace "SWAP_KV" in Cloudflare Pages → Settings → Functions.
+ * Bind KV namespace "SWAP_KV" in Pages → Settings → Bindings.
  */
+
+const SWAP_TIMEOUT_MS = 10 * 60 * 1000;
+const WHITELIST = ["0xa28d6a8eb65a41f3958f1de62cbfca20b817e66a"];
 
 interface ApiNftSlot {
   contract: string;
@@ -34,7 +37,9 @@ interface StoredRoom {
   sideB: ApiParty;
   messages: ChatMessage[];
   chainOrderId: string | null;
-  status: "open" | "both_confirmed" | "executed";
+  status: "open" | "both_confirmed" | "executed" | "cancelled";
+  swapDeadlineAt: number | null;
+  depositedBy: "A" | "B" | null;
 }
 
 interface Env {
@@ -57,13 +62,24 @@ function emptyRoom(id: string, creatorToken: string): StoredRoom {
     messages: [],
     chainOrderId: null,
     status: "open",
+    swapDeadlineAt: null,
+    depositedBy: null,
+  };
+}
+
+function normalizeRoom(raw: StoredRoom): StoredRoom {
+  return {
+    ...emptyRoom(raw.id, raw.creatorToken),
+    ...raw,
+    swapDeadlineAt: raw.swapDeadlineAt ?? null,
+    depositedBy: raw.depositedBy ?? null,
   };
 }
 
 async function loadRoom(env: Env, id: string): Promise<StoredRoom | null> {
   if (env.SWAP_KV) {
     const raw = await env.SWAP_KV.get(`room:${id}`);
-    if (raw) return JSON.parse(raw) as StoredRoom;
+    if (raw) return normalizeRoom(JSON.parse(raw) as StoredRoom);
     return null;
   }
   return memory.get(id) ?? null;
@@ -99,6 +115,22 @@ function canEditSide(
   return false;
 }
 
+function validateSlots(slots: (ApiNftSlot | null)[]): boolean {
+  for (const slot of slots) {
+    if (!slot) continue;
+    if (!WHITELIST.includes(slot.contract.toLowerCase())) return false;
+    if (!/^\d+$/.test(slot.tokenId)) return false;
+  }
+  return true;
+}
+
+function unlockParties(room: StoredRoom) {
+  for (const party of [room.sideA, room.sideB]) {
+    party.confirmed = false;
+    party.slots = party.slots.map((s) => (s ? { ...s, locked: false } : null));
+  }
+}
+
 export const onRequest = async (context: {
   request: Request;
   env: Env;
@@ -109,7 +141,6 @@ export const onRequest = async (context: {
   const method = request.method;
   const url = new URL(request.url);
 
-  // POST /api/rooms — create
   if (path.length === 0 && method === "POST") {
     const id = crypto.randomUUID().slice(0, 8);
     const creatorToken = crypto.randomUUID().replace(/-/g, "");
@@ -121,15 +152,13 @@ export const onRequest = async (context: {
   const roomId = path[0];
   if (!roomId) return new Response("Not found", { status: 404 });
 
-  // /api/rooms/:id/messages
   if (path[1] === "messages") {
     const room = await loadRoom(env, roomId);
     if (!room) return new Response("Room not found", { status: 404 });
 
     if (method === "GET") {
       const since = Number(url.searchParams.get("since") ?? 0);
-      const messages = room.messages.filter((m) => m.at > since);
-      return Response.json(messages);
+      return Response.json(room.messages.filter((m) => m.at > since));
     }
 
     if (method === "POST") {
@@ -159,14 +188,12 @@ export const onRequest = async (context: {
     return new Response("Method not allowed", { status: 405 });
   }
 
-  // GET /api/rooms/:id
   if (method === "GET" && path.length === 1) {
     const room = await loadRoom(env, roomId);
     if (!room) return new Response("Room not found", { status: 404 });
     return Response.json(publicRoom(room));
   }
 
-  // PATCH /api/rooms/:id
   if (method === "PATCH" && path.length === 1) {
     const room = await loadRoom(env, roomId);
     if (!room) return new Response("Room not found", { status: 404 });
@@ -177,7 +204,38 @@ export const onRequest = async (context: {
       address?: string;
       creatorToken?: string;
       chainOrderId?: string;
+      action?: "depositStarted" | "swapExecuted" | "swapReset";
     };
+
+    if (body.action === "depositStarted") {
+      if (!body.side || !canEditSide(room, body.side, body.address, body.creatorToken)) {
+        return new Response("Unauthorized", { status: 403 });
+      }
+      if (!room.swapDeadlineAt) {
+        room.swapDeadlineAt = Date.now() + SWAP_TIMEOUT_MS;
+        room.depositedBy = body.side;
+      }
+      await saveRoom(env, room);
+      return Response.json(publicRoom(room));
+    }
+
+    if (body.action === "swapExecuted") {
+      room.status = "executed";
+      room.swapDeadlineAt = null;
+      room.depositedBy = null;
+      await saveRoom(env, room);
+      return Response.json(publicRoom(room));
+    }
+
+    if (body.action === "swapReset") {
+      room.status = "cancelled";
+      room.swapDeadlineAt = null;
+      room.depositedBy = null;
+      room.chainOrderId = null;
+      unlockParties(room);
+      await saveRoom(env, room);
+      return Response.json(publicRoom(room));
+    }
 
     if (body.chainOrderId) {
       if (!authCreator(room, body.creatorToken)) {
@@ -196,10 +254,19 @@ export const onRequest = async (context: {
       return new Response("Unauthorized", { status: 403 });
     }
 
+    if (room.swapDeadlineAt && Date.now() < room.swapDeadlineAt) {
+      return new Response("Swap in progress", { status: 409 });
+    }
+
     const key = body.side === "A" ? "sideA" : "sideB";
     const party = room[key];
     if (body.address) party.address = body.address;
-    if (body.patch.slots) party.slots = body.patch.slots;
+    if (body.patch.slots) {
+      if (!validateSlots(body.patch.slots)) {
+        return new Response("Invalid slot contract", { status: 400 });
+      }
+      party.slots = body.patch.slots;
+    }
     if (typeof body.patch.confirmed === "boolean") party.confirmed = body.patch.confirmed;
 
     if (room.sideA.confirmed && room.sideB.confirmed) {

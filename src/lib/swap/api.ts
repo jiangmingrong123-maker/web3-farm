@@ -1,5 +1,6 @@
 import { SWAP_SLOTS_PER_SIDE } from "@/config/swap";
 import type { VerifiedNft } from "@/lib/nft/verify";
+import { SWAP_TIMEOUT_MS } from "./constants";
 import type { ApiNftSlot, ApiParty, ApiRoom, ChatMessage, CreateRoomResponse } from "./api-types";
 
 const API = "/api/rooms";
@@ -55,6 +56,8 @@ function emptyRoom(id: string): ApiRoom {
     messages: [],
     chainOrderId: null,
     status: "open",
+    swapDeadlineAt: null,
+    depositedBy: null,
   };
 }
 
@@ -72,6 +75,64 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T | null> 
   } catch {
     return null;
   }
+}
+
+type RoomAction = "depositStarted" | "swapExecuted" | "swapReset";
+
+async function roomActionApi(
+  roomId: string,
+  action: RoomAction,
+  opts?: { side?: "A" | "B"; address?: string; creatorToken?: string },
+): Promise<ApiRoom | null> {
+  const creatorToken = opts?.creatorToken ?? getCreatorToken(roomId) ?? undefined;
+  const remote = await apiFetch<ApiRoom>(`${API}/${roomId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ action, ...opts, creatorToken }),
+  });
+  if (remote) return remote;
+
+  const all = localLoad();
+  const entry = all[roomId];
+  if (!entry) return null;
+
+  if (action === "depositStarted" && opts?.side && !entry.swapDeadlineAt) {
+    entry.swapDeadlineAt = Date.now() + SWAP_TIMEOUT_MS;
+    entry.depositedBy = opts.side;
+  } else if (action === "swapExecuted") {
+    entry.status = "executed";
+    entry.swapDeadlineAt = null;
+    entry.depositedBy = null;
+  } else if (action === "swapReset") {
+    entry.status = "cancelled";
+    entry.swapDeadlineAt = null;
+    entry.depositedBy = null;
+    entry.chainOrderId = null;
+    for (const side of [entry.sideA, entry.sideB] as const) {
+      side.confirmed = false;
+      side.slots = side.slots.map((s) => (s ? { ...s, locked: false } : null));
+    }
+  }
+
+  localSave(all);
+  const { creatorToken: _ct, ...room } = entry;
+  void _ct;
+  return room;
+}
+
+export async function markDepositStartedApi(
+  roomId: string,
+  side: "A" | "B",
+  opts?: { address?: string; creatorToken?: string },
+) {
+  return roomActionApi(roomId, "depositStarted", { side, ...opts });
+}
+
+export async function markSwapExecutedApi(roomId: string) {
+  return roomActionApi(roomId, "swapExecuted");
+}
+
+export async function markSwapResetApi(roomId: string) {
+  return roomActionApi(roomId, "swapReset");
 }
 
 export async function createRoomApi(): Promise<CreateRoomResponse> {
@@ -118,11 +179,16 @@ export async function updatePartyApi(
   const all = localLoad();
   const entry = all[roomId];
   if (!entry) return null;
+  if (entry.swapDeadlineAt && Date.now() < entry.swapDeadlineAt) {
+    return null;
+  }
   const key = side === "A" ? "sideA" : "sideB";
   entry[key] = { ...entry[key], ...patch };
   if (opts?.address) entry[key].address = opts.address;
   if (entry.sideA.confirmed && entry.sideB.confirmed) {
     entry.status = "both_confirmed";
+  } else {
+    entry.status = "open";
   }
   localSave(all);
   const { creatorToken: _ct, ...room } = entry;
@@ -182,7 +248,6 @@ export async function setChainOrderIdApi(
 
 const GUEST_SIDE_KEY = (roomId: string) => `swap_guest_${roomId}`;
 
-/** Resolve which side the current user controls. */
 export function resolveMySide(
   room: ApiRoom,
   address: string | undefined,
@@ -196,7 +261,6 @@ export function resolveMySide(
     if (!room.sideB.address) return "B";
   }
   if (creatorToken) return "A";
-  // Opened shared link without wallet → guest is side B (view + chat)
   if (roomId && typeof window !== "undefined") {
     const stored = sessionStorage.getItem(GUEST_SIDE_KEY(roomId));
     if (stored === "B") return "B";
