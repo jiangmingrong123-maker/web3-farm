@@ -192,7 +192,7 @@ export function SwapBoard({ initialRoomId }: { initialRoomId?: string }) {
         collectionName: slot.collectionName,
         collectionSlug: slot.collectionSlug,
         chainId: 1,
-        tokenUri: null,
+        tokenUri: slot.tokenUri ?? null,
         imageUrl: slot.imageUrl,
         verified: true as const,
       },

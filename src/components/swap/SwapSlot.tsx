@@ -1,6 +1,8 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
+import { resolveNftImage } from "@/lib/nft/metadata";
 import type { SwapSlotItem } from "@/lib/swap/types";
 
 interface SwapSlotProps {
@@ -13,6 +15,27 @@ interface SwapSlotProps {
 
 export function SwapSlot({ index, item, editable, onAdd, onRemove }: SwapSlotProps) {
   const t = useTranslations("swap");
+  const [imageUrl, setImageUrl] = useState<string | null>(item?.nft.imageUrl ?? null);
+  const [imageBroken, setImageBroken] = useState(false);
+
+  const tokenId = item?.nft.tokenId.toString() ?? "";
+
+  useEffect(() => {
+    if (!item) return;
+    setImageBroken(false);
+    if (item.nft.imageUrl) {
+      setImageUrl(item.nft.imageUrl);
+      return;
+    }
+    if (!item.nft.tokenUri) return;
+    let cancelled = false;
+    resolveNftImage(item.nft.tokenUri).then((url) => {
+      if (!cancelled && url) setImageUrl(url);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [item]);
 
   return (
     <div
@@ -22,31 +45,39 @@ export function SwapSlot({ index, item, editable, onAdd, onRemove }: SwapSlotPro
           : "border-dashed border-white/15 bg-black/30 hover:border-gold/30"
       }`}
     >
-      <span className="absolute left-2 top-2 font-mono text-[10px] text-white/30">
+      <span className="absolute left-2 top-2 z-10 font-mono text-[10px] text-white/40">
         {String(index + 1).padStart(2, "0")}
       </span>
 
       {item ? (
         <>
-          {item.nft.imageUrl ? (
-            <img
-              src={item.nft.imageUrl}
-              alt={`#${item.nft.tokenId.toString()}`}
-              className="h-full w-full object-cover"
-            />
-          ) : (
-            <div className="flex flex-1 flex-col items-center justify-center gap-1 p-2">
-              <span className="text-2xl text-gold">✦</span>
-              <span className="font-mono text-sm font-bold text-gold">
-                #{item.nft.tokenId.toString()}
-              </span>
-            </div>
-          )}
-          <div className="border-t border-white/10 bg-black/60 p-2">
-            <p className="truncate text-[10px] font-semibold text-white/80">
-              {item.nft.collectionName}
+          <div className="relative min-h-0 flex-1 bg-black/50">
+            {imageUrl && !imageBroken ? (
+              <img
+                src={imageUrl}
+                alt={`${item.nft.collectionName} #${tokenId}`}
+                className="absolute inset-0 h-full w-full object-cover"
+                onError={() => setImageBroken(true)}
+              />
+            ) : (
+              <div className="flex h-full flex-col items-center justify-center gap-2 p-3">
+                <span className="text-3xl text-gold/40">✦</span>
+                <span className="font-mono text-lg font-bold text-gold">
+                  #{tokenId}
+                </span>
+              </div>
+            )}
+            <span className="absolute bottom-2 right-2 z-10 rounded-md bg-black/75 px-2 py-0.5 font-mono text-[11px] font-bold text-gold shadow">
+              #{tokenId}
+            </span>
+          </div>
+
+          <div className="border-t border-white/10 bg-black/70 p-2">
+            <p className="truncate text-xs font-semibold text-white">
+              {item.nft.collectionName}{" "}
+              <span className="font-mono text-gold">#{tokenId}</span>
             </p>
-            <p className="truncate font-mono text-[9px] text-emerald-400/80">
+            <p className="truncate text-[10px] text-emerald-400/80">
               {t("verifiedOnChain")}
             </p>
             {editable && !item.locked && onRemove && (

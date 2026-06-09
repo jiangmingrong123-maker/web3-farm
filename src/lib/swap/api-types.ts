@@ -4,6 +4,7 @@ export interface ApiNftSlot {
   tokenId: string;
   collectionName: string;
   collectionSlug: string;
+  tokenUri: string | null;
   imageUrl: string | null;
   locked: boolean;
 }

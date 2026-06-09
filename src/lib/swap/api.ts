@@ -22,6 +22,7 @@ export function verifiedToApiSlot(nft: VerifiedNft, locked: boolean): ApiNftSlot
     tokenId: nft.tokenId.toString(),
     collectionName: nft.collectionName,
     collectionSlug: nft.collectionSlug,
+    tokenUri: nft.tokenUri,
     imageUrl: nft.imageUrl,
     locked,
   };

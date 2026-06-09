@@ -57,6 +57,42 @@ function decodeString(hex: string): string | null {
   }
 }
 
+const IPFS_GATEWAYS = [
+  "https://ipfs.io/ipfs/",
+  "https://cloudflare-ipfs.com/ipfs/",
+  "https://dweb.link/ipfs/",
+];
+
+function ipfsToHttp(uri: string): string | null {
+  if (uri.startsWith("ipfs://")) {
+    return `${IPFS_GATEWAYS[0]}${uri.replace("ipfs://", "")}`;
+  }
+  if (uri.startsWith("http://") || uri.startsWith("https://")) return uri;
+  return null;
+}
+
+async function resolveNftImage(tokenUri: string): Promise<string | null> {
+  const cidPath = tokenUri.startsWith("ipfs://") ? tokenUri.replace("ipfs://", "") : null;
+  const jsonUrls = cidPath
+    ? IPFS_GATEWAYS.map((g) => `${g}${cidPath}`)
+    : [ipfsToHttp(tokenUri)].filter(Boolean);
+
+  for (const jsonUrl of jsonUrls) {
+    if (!jsonUrl) continue;
+    try {
+      const res = await fetch(jsonUrl);
+      if (!res.ok) continue;
+      const data = (await res.json()) as { image?: string };
+      if (!data.image) continue;
+      const img = ipfsToHttp(data.image);
+      if (img) return img;
+    } catch {
+      /* try next gateway */
+    }
+  }
+  return null;
+}
+
 async function ethCall(to: string, data: string): Promise<string> {
   const res = await fetch(RPC_URL, {
     method: "POST",
@@ -122,6 +158,8 @@ export async function onRequestPost(context: { request: Request }) {
       tokenUri = null;
     }
 
+    const imageUrl = tokenUri ? await resolveNftImage(tokenUri) : null;
+
     return json({
       ok: true,
       nft: {
@@ -132,7 +170,7 @@ export async function onRequestPost(context: { request: Request }) {
         collectionSlug: NOBODY_SLUG,
         chainId: 1,
         tokenUri,
-        imageUrl: null,
+        imageUrl,
         verified: true,
       },
     });

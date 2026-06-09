@@ -49,8 +49,8 @@ export function AddNftPanel({ onAdded, onCancel }: AddNftPanelProps) {
       return;
     }
 
-    let imageUrl: string | null = null;
-    if (result.nft.tokenUri) {
+    let imageUrl = result.nft.imageUrl;
+    if (!imageUrl && result.nft.tokenUri) {
       imageUrl = await resolveNftImage(result.nft.tokenUri);
     }
 
