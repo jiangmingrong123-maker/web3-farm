@@ -162,7 +162,7 @@
     "errNotWhitelisted": "该合约不在白名单，无法交换",
     "errInvalidToken": "Token ID 无效",
     "errNotOwner": "该 NFT 不属于当前钱包",
-    "errRpc": "链上查询失败，请稍后重试",
+    "errRpc": "网络繁忙，请稍等后重试（已自动重试 3 次）",
     "errNotFound": "链上未找到该 NFT"
   }
 }

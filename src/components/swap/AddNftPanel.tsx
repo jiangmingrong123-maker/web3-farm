@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { useAccount } from "wagmi";
 import { COLLECTIONS } from "@/config/collections";
-import { resolveNftImage } from "@/lib/nft/metadata";
+import { nftProxyImageUrl } from "@/lib/nft/proxy-image";
 import { verifyNftOwnership, type VerifyNftError } from "@/lib/nft/verify";
 import type { VerifiedNft } from "@/lib/nft/verify";
 
@@ -49,10 +49,9 @@ export function AddNftPanel({ onAdded, onCancel }: AddNftPanelProps) {
       return;
     }
 
-    let imageUrl = result.nft.imageUrl;
-    if (!imageUrl && result.nft.tokenUri) {
-      imageUrl = await resolveNftImage(result.nft.tokenUri);
-    }
+    const imageUrl =
+      result.nft.imageUrl ??
+      nftProxyImageUrl(result.nft.contract, result.nft.tokenId.toString());
 
     onAdded({ ...result.nft, imageUrl });
     setLoading(false);

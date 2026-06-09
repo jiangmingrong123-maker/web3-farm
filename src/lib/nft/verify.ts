@@ -43,15 +43,27 @@ type ApiVerifyResponse =
     }
   | { ok: false; error: VerifyNftError };
 
-async function verifyViaApi(
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+async function verifyViaApiOnce(
   contractAddress: string,
   tokenIdInput: string,
   walletAddress: Address,
-): Promise<{ ok: true; nft: VerifiedNft } | { ok: false; error: VerifyNftError } | null> {
+): Promise<
+  | { ok: true; nft: VerifiedNft }
+  | { ok: false; error: VerifyNftError }
+  | null
+> {
   try {
     const res = await fetch("/api/nft/verify", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      cache: "no-store",
+      headers: {
+        "Content-Type": "application/json",
+        "Cache-Control": "no-cache",
+      },
       body: JSON.stringify({
         contract: contractAddress,
         tokenId: tokenIdInput,
@@ -76,6 +88,25 @@ async function verifyViaApi(
   }
 }
 
+async function verifyViaApi(
+  contractAddress: string,
+  tokenIdInput: string,
+  walletAddress: Address,
+): Promise<{ ok: true; nft: VerifiedNft } | { ok: false; error: VerifyNftError }> {
+  const retries = 3;
+  for (let i = 0; i < retries; i++) {
+    const result = await verifyViaApiOnce(
+      contractAddress,
+      tokenIdInput,
+      walletAddress,
+    );
+    if (result?.ok) return result;
+    if (result && !result.ok && result.error !== "RPC_ERROR") return result;
+    if (i < retries - 1) await sleep(800 * (i + 1));
+  }
+  return { ok: false, error: "RPC_ERROR" };
+}
+
 export async function verifyNftOwnership(
   contractAddress: string,
   tokenIdInput: string,
@@ -96,7 +127,8 @@ export async function verifyNftOwnership(
   }
 
   const apiResult = await verifyViaApi(normalized, tokenIdInput, walletAddress);
-  if (apiResult) return apiResult;
+  if (apiResult.ok) return apiResult;
+  if (apiResult.error !== "RPC_ERROR") return apiResult;
 
   const collection = getCollectionByContract(normalized);
   const contract = normalized as `0x${string}`;

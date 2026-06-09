@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useTranslations } from "next-intl";
-import { resolveNftImage } from "@/lib/nft/metadata";
+import { nftProxyImageUrl } from "@/lib/nft/proxy-image";
 import type { SwapSlotItem } from "@/lib/swap/types";
 
 interface SwapSlotProps {
@@ -15,27 +15,13 @@ interface SwapSlotProps {
 
 export function SwapSlot({ index, item, editable, onAdd, onRemove }: SwapSlotProps) {
   const t = useTranslations("swap");
-  const [imageUrl, setImageUrl] = useState<string | null>(item?.nft.imageUrl ?? null);
   const [imageBroken, setImageBroken] = useState(false);
 
   const tokenId = item?.nft.tokenId.toString() ?? "";
-
-  useEffect(() => {
-    if (!item) return;
-    setImageBroken(false);
-    if (item.nft.imageUrl) {
-      setImageUrl(item.nft.imageUrl);
-      return;
-    }
-    if (!item.nft.tokenUri) return;
-    let cancelled = false;
-    resolveNftImage(item.nft.tokenUri).then((url) => {
-      if (!cancelled && url) setImageUrl(url);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [item]);
+  const displayUrl =
+    item && !imageBroken
+      ? nftProxyImageUrl(item.nft.contract, tokenId)
+      : null;
 
   return (
     <div
@@ -52,11 +38,13 @@ export function SwapSlot({ index, item, editable, onAdd, onRemove }: SwapSlotPro
       {item ? (
         <>
           <div className="relative min-h-0 flex-1 bg-black/50">
-            {imageUrl && !imageBroken ? (
+            {displayUrl ? (
               <img
-                src={imageUrl}
+                key={displayUrl}
+                src={displayUrl}
                 alt={`${item.nft.collectionName} #${tokenId}`}
                 className="absolute inset-0 h-full w-full object-cover"
+                loading="lazy"
                 onError={() => setImageBroken(true)}
               />
             ) : (

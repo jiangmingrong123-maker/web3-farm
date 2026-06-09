@@ -4,7 +4,12 @@
  */
 
 const WHITELIST = ["0xa28d6a8eb65a41f3958f1de62cbfca20b817e66a"];
-const RPC_URL = "https://ethereum.publicnode.com";
+const RPC_URLS = [
+  "https://ethereum.publicnode.com",
+  "https://1rpc.io/eth",
+  "https://eth.drpc.org",
+  "https://rpc.ankr.com/eth",
+];
 const NOBODY_NAME = "Nobody";
 const NOBODY_SLUG = "nobody";
 
@@ -23,6 +28,10 @@ function json(data: unknown, status = 200) {
       "Cache-Control": "no-store, no-cache, must-revalidate",
     },
   });
+}
+
+function proxyImageUrl(contract: string, tokenId: string): string {
+  return `/api/nft/image?contract=${encodeURIComponent(contract)}&tokenId=${encodeURIComponent(tokenId)}`;
 }
 
 function encodeOwnerOf(tokenId: bigint): string {
@@ -60,58 +69,36 @@ function decodeString(hex: string): string | null {
   }
 }
 
-const IPFS_GATEWAYS = [
-  "https://ipfs.io/ipfs/",
-  "https://cloudflare-ipfs.com/ipfs/",
-  "https://dweb.link/ipfs/",
-];
+async function ethCall(to: string, data: string): Promise<string> {
+  let lastError: Error | null = null;
 
-function ipfsToHttp(uri: string): string | null {
-  if (uri.startsWith("ipfs://")) {
-    return `${IPFS_GATEWAYS[0]}${uri.replace("ipfs://", "")}`;
-  }
-  if (uri.startsWith("http://") || uri.startsWith("https://")) return uri;
-  return null;
-}
-
-async function resolveNftImage(tokenUri: string): Promise<string | null> {
-  const cidPath = tokenUri.startsWith("ipfs://") ? tokenUri.replace("ipfs://", "") : null;
-  const jsonUrls = cidPath
-    ? IPFS_GATEWAYS.map((g) => `${g}${cidPath}`)
-    : [ipfsToHttp(tokenUri)].filter(Boolean);
-
-  for (const jsonUrl of jsonUrls) {
-    if (!jsonUrl) continue;
+  for (const rpc of RPC_URLS) {
     try {
-      const res = await fetch(jsonUrl);
-      if (!res.ok) continue;
-      const data = (await res.json()) as { image?: string };
-      if (!data.image) continue;
-      const img = ipfsToHttp(data.image);
-      if (img) return img;
-    } catch {
-      /* try next gateway */
+      const res = await fetch(rpc, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "eth_call",
+          params: [{ to, data }, "latest"],
+        }),
+        signal: AbortSignal.timeout(25_000),
+      });
+      if (!res.ok) throw new Error("RPC_HTTP");
+      const body = (await res.json()) as {
+        result?: string;
+        error?: { message: string };
+      };
+      if (body.error) throw new Error(body.error.message);
+      if (!body.result || body.result === "0x") throw new Error("EMPTY_RESULT");
+      return body.result;
+    } catch (e) {
+      lastError = e instanceof Error ? e : new Error(String(e));
     }
   }
-  return null;
-}
 
-async function ethCall(to: string, data: string): Promise<string> {
-  const res = await fetch(RPC_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: 1,
-      method: "eth_call",
-      params: [{ to, data }, "latest"],
-    }),
-  });
-  if (!res.ok) throw new Error("RPC_HTTP");
-  const body = (await res.json()) as { result?: string; error?: { message: string } };
-  if (body.error) throw new Error(body.error.message);
-  if (!body.result || body.result === "0x") throw new Error("EMPTY_RESULT");
-  return body.result;
+  throw lastError ?? new Error("RPC_FAILED");
 }
 
 export async function onRequestPost(context: { request: Request }) {
@@ -161,8 +148,6 @@ export async function onRequestPost(context: { request: Request }) {
       tokenUri = null;
     }
 
-    const imageUrl = tokenUri ? await resolveNftImage(tokenUri) : null;
-
     return json({
       ok: true,
       nft: {
@@ -173,7 +158,7 @@ export async function onRequestPost(context: { request: Request }) {
         collectionSlug: NOBODY_SLUG,
         chainId: 1,
         tokenUri,
-        imageUrl,
+        imageUrl: proxyImageUrl(contract, tokenId.toString()),
         verified: true,
       },
     });
