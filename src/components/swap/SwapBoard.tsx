@@ -17,8 +17,10 @@ import {
   verifiedToApiSlot,
 } from "@/lib/swap/api";
 import { useSwapExecute } from "@/lib/swap/use-swap-execute";
+import { useSwapOrderStatus } from "@/lib/swap/use-swap-order-status";
 import { AddNftPanel } from "./AddNftPanel";
 import { ChatPanel } from "./ChatPanel";
+import { SwapDeadline } from "./SwapDeadline";
 import { SwapSlot } from "./SwapSlot";
 
 function getCreatorTokenFromStorage(roomId: string): string | null {
@@ -34,6 +36,8 @@ export function SwapBoard({ initialRoomId }: { initialRoomId?: string }) {
   const [addingSlot, setAddingSlot] = useState<number | null>(null);
   const [copied, setCopied] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [tick, setTick] = useState(0);
+  const [orderTick, setOrderTick] = useState(0);
 
   const creatorToken = roomId ? getCreatorTokenFromStorage(roomId) : null;
   const mySide = room ? resolveMySide(room, address, creatorToken, roomId) : null;
@@ -56,6 +60,11 @@ export function SwapBoard({ initialRoomId }: { initialRoomId?: string }) {
     const id = setInterval(() => refresh(roomId), 3000);
     return () => clearInterval(id);
   }, [roomId, refresh]);
+
+  useEffect(() => {
+    const id = setInterval(() => setTick((n) => n + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
 
   useEffect(() => {
     if (!roomId || !room || !address || !mySide) return;
@@ -107,8 +116,30 @@ export function SwapBoard({ initialRoomId }: { initialRoomId?: string }) {
     setAddingSlot(null);
   };
 
+  const orderStatus = useSwapOrderStatus(room?.chainOrderId, mySide, tick);
+
+  const onChainUpdate = useCallback(() => {
+    setOrderTick((n) => n + 1);
+    if (roomId) refresh(roomId);
+  }, [roomId, refresh]);
+
+  void orderTick;
+
+  const {
+    deposit,
+    withdraw,
+    pending: chainPending,
+    error: chainError,
+    canDeposit,
+    canWithdraw,
+    swapInProgress,
+    myDeposited,
+  } = useSwapExecute(room, mySide, orderStatus, onChainUpdate);
+
+  const swapLocked = myDeposited || (swapInProgress && myDeposited);
+
   const handleRemove = async (slotIndex: number) => {
-    if (!myParty || myParty.confirmed) return;
+    if (!myParty || myParty.confirmed || swapLocked) return;
     const slots = [...myParty.slots];
     slots[slotIndex] = null;
     await persistParty({ slots, confirmed: false });
@@ -123,7 +154,7 @@ export function SwapBoard({ initialRoomId }: { initialRoomId?: string }) {
   };
 
   const handleResetConfirm = async () => {
-    if (!myParty) return;
+    if (!myParty || myDeposited || swapInProgress) return;
     const slots = myParty.slots.map((s) => (s ? { ...s, locked: false } : null));
     await persistParty({ slots, confirmed: false });
   };
@@ -134,14 +165,6 @@ export function SwapBoard({ initialRoomId }: { initialRoomId?: string }) {
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
-
-  const {
-    deposit,
-    pending: chainPending,
-    error: chainError,
-    canDeposit,
-    withdrawTimeoutHours,
-  } = useSwapExecute(room, mySide);
 
   const selfFilled = myParty?.slots.filter(Boolean).length ?? 0;
 
@@ -236,9 +259,9 @@ export function SwapBoard({ initialRoomId }: { initialRoomId?: string }) {
                     key={i}
                     index={i}
                     item={apiNftToSlotItem(item)}
-                    editable={isConnected && !myParty.confirmed}
-                    onAdd={() => isConnected && setAddingSlot(i)}
-                    onRemove={() => handleRemove(i)}
+                    editable={isConnected && !myParty.confirmed && !swapLocked}
+                    onAdd={() => isConnected && !swapLocked && setAddingSlot(i)}
+                    onRemove={() => !swapLocked && handleRemove(i)}
                   />
                 ))}
               </div>
@@ -265,9 +288,9 @@ export function SwapBoard({ initialRoomId }: { initialRoomId?: string }) {
                 ) : (
                   <button
                     type="button"
-                    disabled={!isConnected}
+                    disabled={!isConnected || swapLocked}
                     onClick={handleResetConfirm}
-                    className="flex-1 rounded-full border border-white/20 px-4 py-2.5 text-sm text-white/70"
+                    className="flex-1 rounded-full border border-white/20 px-4 py-2.5 text-sm text-white/70 disabled:opacity-40"
                   >
                     {t("revokeConfirm")}
                   </button>
@@ -303,17 +326,35 @@ export function SwapBoard({ initialRoomId }: { initialRoomId?: string }) {
             </section>
           </div>
 
-          {canDeposit && (
+          {orderStatus.awaitingCounterparty && (
+            <SwapDeadline
+              remainingSec={orderStatus.remainingSec}
+              expired={orderStatus.expired}
+              myDeposited={orderStatus.myDeposited}
+            />
+          )}
+
+          {orderStatus.executed && (
+            <p className="rounded-2xl border border-emerald-500/40 bg-emerald-500/10 py-4 text-center text-sm font-semibold text-emerald-300">
+              {t("swapCompleted")}
+            </p>
+          )}
+
+          {(canDeposit || myDeposited) && !orderStatus.executed && (
             <div className="rounded-2xl border border-gold/40 bg-gold/10 p-5 text-center">
               <p className="mb-2 text-sm text-white/70">{t("depositHint")}</p>
               <p className="mb-4 text-xs text-white/45">{t("depositAtomicNote")}</p>
               <button
                 type="button"
-                disabled={chainPending}
+                disabled={chainPending || !canDeposit || myDeposited}
                 onClick={deposit}
-                className="rounded-full bg-gold px-8 py-3 text-sm font-bold text-ink disabled:opacity-40"
+                className="rounded-full bg-gold px-8 py-3 text-sm font-bold text-ink disabled:cursor-not-allowed disabled:opacity-40"
               >
-                {chainPending ? t("executing") : t("depositNfts")}
+                {chainPending
+                  ? t("executing")
+                  : myDeposited
+                    ? t("depositDone")
+                    : t("depositNfts")}
               </button>
               {chainError && (
                 <p className="mt-2 text-xs text-red-400">{t("executeFailed")}</p>
@@ -321,10 +362,17 @@ export function SwapBoard({ initialRoomId }: { initialRoomId?: string }) {
             </div>
           )}
 
-          {SWAP_ESCROW_ENABLED && room.status === "both_confirmed" && isConnected && (
-            <p className="text-center text-xs text-white/35">
-              {t("withdrawHint", { hours: withdrawTimeoutHours })}
-            </p>
+          {canWithdraw && (
+            <div className="text-center">
+              <button
+                type="button"
+                disabled={chainPending}
+                onClick={withdraw}
+                className="rounded-full border border-red-400/50 px-8 py-3 text-sm font-semibold text-red-300 disabled:opacity-40"
+              >
+                {chainPending ? t("executing") : t("withdrawNfts")}
+              </button>
+            </div>
           )}
 
         </>

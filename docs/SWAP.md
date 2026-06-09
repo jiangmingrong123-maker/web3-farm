@@ -14,7 +14,7 @@
 唯一需要超时退回的场景：**你只完成了「存入」，对方一直不存**。
 
 ```
-你：已存入 ✅    对方：未存入 ❌   → 等 48h → 你可 withdraw 取回
+你：已存入 ✅    对方：未存入 ❌   → 等 10 分钟 → 你可 withdraw 取回
 你：已存入 ✅    对方：已存入 ✅   → 自动成交（同一笔 tx 互转）
 ```
 
@@ -25,7 +25,7 @@
 | 假图 | 链上 `ownerOf` + `tokenURI`，不接受上传 |
 | 山寨合约 | 白名单集合 |
 | 全集授权 | **不用** `setApprovalForAll`，只 `safeTransferFrom` 你确认的 NFT |
-| 对方不存 | **48 小时** `withdraw` 原路取回 |
+| 对方不存 | **10 分钟**倒计时后 `withdraw` 原路取回 |
 | 托管合约漏洞 | 开源、Etherscan 验证、主网前审计 |
 
 ## 链上流程
@@ -34,7 +34,7 @@
 2. 甲方（创建者）链上 `createOrder(对方地址, 我方 NFT 列表, 对方 NFT 列表)`
 3. 甲方 `deposit` → NFT 进托管
 4. 乙方 `deposit` → NFT 进托管 → **自动 `execute` 互转**
-5. 若乙方一直不 `deposit`，甲方 48h 后 `withdraw`
+5. 若乙方一直不 `deposit`，网页显示 10 分钟倒计时，超时后甲方 `withdraw`
 
 ## 部署
 

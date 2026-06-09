@@ -4,7 +4,8 @@ import { useCallback, useState } from "react";
 import { useAccount, useWriteContract, usePublicClient } from "wagmi";
 import { SWAP_ESCROW_ADDRESS, SWAP_ESCROW_ENABLED } from "@/config/swap";
 import type { ApiParty, ApiRoom } from "./api-types";
-import { swapEscrowAbi, type NftItemInput, WITHDRAW_TIMEOUT_SEC } from "./escrow-abi";
+import type { SwapOrderStatus } from "./use-swap-order-status";
+import { swapEscrowAbi, type NftItemInput } from "./escrow-abi";
 import { setChainOrderIdApi } from "./api";
 
 function partyToItems(party: ApiParty): NftItemInput[] {
@@ -22,7 +23,12 @@ function counterpartyAddress(room: ApiRoom, mySide: "A" | "B"): `0x${string}` | 
   return other.address as `0x${string}`;
 }
 
-export function useSwapExecute(room: ApiRoom | null, mySide: "A" | "B" | null) {
+export function useSwapExecute(
+  room: ApiRoom | null,
+  mySide: "A" | "B" | null,
+  orderStatus: SwapOrderStatus,
+  onChainUpdate?: () => void,
+) {
   const { address } = useAccount();
   const { writeContractAsync } = useWriteContract();
   const publicClient = usePublicClient();
@@ -34,7 +40,6 @@ export function useSwapExecute(room: ApiRoom | null, mySide: "A" | "B" | null) {
     return room.chainOrderId as `0x${string}`;
   }, [room?.chainOrderId]);
 
-  /** Create on-chain order (maker / side A). */
   const createOrder = useCallback(async () => {
     if (!room || mySide !== "A" || !address || !publicClient) return null;
     const taker = counterpartyAddress(room, "A");
@@ -55,13 +60,10 @@ export function useSwapExecute(room: ApiRoom | null, mySide: "A" | "B" | null) {
     const hash = await writeContractAsync(sim.request);
     await publicClient.waitForTransactionReceipt({ hash });
     await setChainOrderIdApi(room.id, orderId);
+    onChainUpdate?.();
     return orderId;
-  }, [room, mySide, address, publicClient, writeContractAsync]);
+  }, [room, mySide, address, publicClient, writeContractAsync, onChainUpdate]);
 
-  /**
-   * Deposit NFTs into escrow (no approve-all).
-   * When both sides deposited, contract auto-executes atomically.
-   */
   const deposit = useCallback(async () => {
     if (!room || !mySide || !address || !SWAP_ESCROW_ENABLED || !publicClient) return;
     setPending(true);
@@ -85,14 +87,23 @@ export function useSwapExecute(room: ApiRoom | null, mySide: "A" | "B" | null) {
       });
       const hash = await writeContractAsync(sim.request);
       await publicClient.waitForTransactionReceipt({ hash });
+      onChainUpdate?.();
     } catch {
       setError("TX_FAILED");
     } finally {
       setPending(false);
     }
-  }, [room, mySide, address, publicClient, writeContractAsync, getOrderId, createOrder]);
+  }, [
+    room,
+    mySide,
+    address,
+    publicClient,
+    writeContractAsync,
+    getOrderId,
+    createOrder,
+    onChainUpdate,
+  ]);
 
-  /** Reclaim after 48h if counterparty never deposited. */
   const withdraw = useCallback(async () => {
     if (!room || !mySide || !address || !publicClient) return;
     const orderId = await getOrderId();
@@ -109,12 +120,16 @@ export function useSwapExecute(room: ApiRoom | null, mySide: "A" | "B" | null) {
       });
       const hash = await writeContractAsync(sim.request);
       await publicClient.waitForTransactionReceipt({ hash });
+      onChainUpdate?.();
     } catch {
       setError("TX_FAILED");
     } finally {
       setPending(false);
     }
-  }, [room, mySide, address, publicClient, writeContractAsync, getOrderId]);
+  }, [room, mySide, address, publicClient, writeContractAsync, getOrderId, onChainUpdate]);
+
+  const swapInProgress =
+    orderStatus.awaitingCounterparty && !orderStatus.expired;
 
   const canDeposit =
     SWAP_ESCROW_ENABLED &&
@@ -122,7 +137,17 @@ export function useSwapExecute(room: ApiRoom | null, mySide: "A" | "B" | null) {
     room.status === "both_confirmed" &&
     !!mySide &&
     !!address &&
-    (mySide === "B" ? !!room.sideA.address : true);
+    !orderStatus.myDeposited &&
+    !orderStatus.executed &&
+    !orderStatus.expired &&
+    (mySide === "B" ? !!room.sideA.address : true) &&
+    (!swapInProgress || !orderStatus.myDeposited);
+
+  const canWithdraw =
+    SWAP_ESCROW_ENABLED &&
+    orderStatus.expired &&
+    orderStatus.myDeposited &&
+    !orderStatus.executed;
 
   return {
     deposit,
@@ -130,6 +155,8 @@ export function useSwapExecute(room: ApiRoom | null, mySide: "A" | "B" | null) {
     pending,
     error,
     canDeposit,
-    withdrawTimeoutHours: WITHDRAW_TIMEOUT_SEC / 3600,
+    canWithdraw,
+    swapInProgress,
+    myDeposited: orderStatus.myDeposited,
   };
 }

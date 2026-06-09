@@ -32,8 +32,8 @@ contract NFTSwapEscrow {
         bool takerRefunded;
     }
 
-    /// @dev 48 hours — depositor can reclaim if counterparty never deposits
-    uint256 public constant WITHDRAW_TIMEOUT = 48 hours;
+    /// @dev 10 minutes — depositor can reclaim if counterparty never deposits
+    uint256 public constant WITHDRAW_TIMEOUT = 10 minutes;
 
     address public owner;
     mapping(bytes32 => SwapOrder) public orders;
