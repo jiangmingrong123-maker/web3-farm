@@ -4,8 +4,7 @@ import { useCallback, useState } from "react";
 import { useAccount, useWriteContract, usePublicClient } from "wagmi";
 import { SWAP_ESCROW_ADDRESS, SWAP_ESCROW_ENABLED } from "@/config/swap";
 import type { ApiParty, ApiRoom } from "./api-types";
-import { swapEscrowAbi, type NftItemInput } from "./escrow-abi";
-import { erc721Abi } from "@/lib/nft/abi";
+import { swapEscrowAbi, type NftItemInput, WITHDRAW_TIMEOUT_SEC } from "./escrow-abi";
 import { setChainOrderIdApi } from "./api";
 
 function partyToItems(party: ApiParty): NftItemInput[] {
@@ -17,6 +16,12 @@ function partyToItems(party: ApiParty): NftItemInput[] {
     }));
 }
 
+function counterpartyAddress(room: ApiRoom, mySide: "A" | "B"): `0x${string}` | null {
+  const other = mySide === "A" ? room.sideB : room.sideA;
+  if (!other.address) return null;
+  return other.address as `0x${string}`;
+}
+
 export function useSwapExecute(room: ApiRoom | null, mySide: "A" | "B" | null) {
   const { address } = useAccount();
   const { writeContractAsync } = useWriteContract();
@@ -24,110 +29,107 @@ export function useSwapExecute(room: ApiRoom | null, mySide: "A" | "B" | null) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const ensureApprovals = useCallback(
-    async (items: NftItemInput[]) => {
-      if (!address || !publicClient) return;
-      for (const item of items) {
-        const approved = await publicClient.readContract({
-          address: item.collection,
-          abi: erc721Abi,
-          functionName: "isApprovedForAll",
-          args: [address, SWAP_ESCROW_ADDRESS],
-        });
-        if (!approved) {
-          await writeContractAsync({
-            address: item.collection,
-            abi: erc721Abi,
-            functionName: "setApprovalForAll",
-            args: [SWAP_ESCROW_ADDRESS, true],
-          });
-        }
-      }
-    },
-    [address, publicClient, writeContractAsync],
-  );
+  const getOrderId = useCallback(async (): Promise<`0x${string}` | null> => {
+    if (!room?.chainOrderId) return null;
+    return room.chainOrderId as `0x${string}`;
+  }, [room?.chainOrderId]);
 
-  const execute = useCallback(async () => {
+  /** Create on-chain order (maker / side A). */
+  const createOrder = useCallback(async () => {
+    if (!room || mySide !== "A" || !address || !publicClient) return null;
+    const taker = counterpartyAddress(room, "A");
+    if (!taker) {
+      setError("NO_COUNTERPARTY");
+      return null;
+    }
+    const makerItems = partyToItems(room.sideA);
+    const takerItems = partyToItems(room.sideB);
+    const sim = await publicClient.simulateContract({
+      address: SWAP_ESCROW_ADDRESS,
+      abi: swapEscrowAbi,
+      functionName: "createOrder",
+      args: [taker, makerItems, takerItems],
+      account: address,
+    });
+    const orderId = sim.result as `0x${string}`;
+    const hash = await writeContractAsync(sim.request);
+    await publicClient.waitForTransactionReceipt({ hash });
+    await setChainOrderIdApi(room.id, orderId);
+    return orderId;
+  }, [room, mySide, address, publicClient, writeContractAsync]);
+
+  /**
+   * Deposit NFTs into escrow (no approve-all).
+   * When both sides deposited, contract auto-executes atomically.
+   */
+  const deposit = useCallback(async () => {
     if (!room || !mySide || !address || !SWAP_ESCROW_ENABLED || !publicClient) return;
     setPending(true);
     setError(null);
-
     try {
-      const makerItems = partyToItems(room.sideA);
-      const takerItems = partyToItems(room.sideB);
-      let orderId = room.chainOrderId as `0x${string}` | null;
-
-      if (mySide === "A" && !orderId) {
-        await ensureApprovals(makerItems);
-        const sim = await publicClient.simulateContract({
-          address: SWAP_ESCROW_ADDRESS,
-          abi: swapEscrowAbi,
-          functionName: "createOrder",
-          args: [makerItems],
-          account: address,
-        });
-        orderId = sim.result as `0x${string}`;
-        const hash = await writeContractAsync(sim.request);
-        await publicClient.waitForTransactionReceipt({ hash });
-        await setChainOrderIdApi(room.id, orderId);
+      let orderId = await getOrderId();
+      if (!orderId && mySide === "A") {
+        orderId = await createOrder();
       }
-
       if (!orderId) {
         setError("NO_ORDER");
         return;
       }
 
-      if (mySide === "B") {
-        const order = await publicClient.readContract({
-          address: SWAP_ESCROW_ADDRESS,
-          abi: swapEscrowAbi,
-          functionName: "orders",
-          args: [orderId],
-        });
-        const taker = order[1] as string;
-        if (taker === "0x0000000000000000000000000000000000000000") {
-          await ensureApprovals(takerItems);
-          const sim = await publicClient.simulateContract({
-            address: SWAP_ESCROW_ADDRESS,
-            abi: swapEscrowAbi,
-            functionName: "acceptOrder",
-            args: [orderId, takerItems],
-            account: address,
-          });
-          const hash = await writeContractAsync(sim.request);
-          await publicClient.waitForTransactionReceipt({ hash });
-        }
-      }
-
-      const confirmSim = await publicClient.simulateContract({
+      const sim = await publicClient.simulateContract({
         address: SWAP_ESCROW_ADDRESS,
         abi: swapEscrowAbi,
-        functionName: "confirm",
+        functionName: "deposit",
         args: [orderId],
         account: address,
       });
-      const hash = await writeContractAsync(confirmSim.request);
+      const hash = await writeContractAsync(sim.request);
       await publicClient.waitForTransactionReceipt({ hash });
     } catch {
       setError("TX_FAILED");
     } finally {
       setPending(false);
     }
-  }, [
-    room,
-    mySide,
-    address,
-    ensureApprovals,
-    writeContractAsync,
-    publicClient,
-  ]);
+  }, [room, mySide, address, publicClient, writeContractAsync, getOrderId, createOrder]);
 
-  const canExecute =
+  /** Reclaim after 48h if counterparty never deposited. */
+  const withdraw = useCallback(async () => {
+    if (!room || !mySide || !address || !publicClient) return;
+    const orderId = await getOrderId();
+    if (!orderId) return;
+    setPending(true);
+    setError(null);
+    try {
+      const sim = await publicClient.simulateContract({
+        address: SWAP_ESCROW_ADDRESS,
+        abi: swapEscrowAbi,
+        functionName: "withdraw",
+        args: [orderId],
+        account: address,
+      });
+      const hash = await writeContractAsync(sim.request);
+      await publicClient.waitForTransactionReceipt({ hash });
+    } catch {
+      setError("TX_FAILED");
+    } finally {
+      setPending(false);
+    }
+  }, [room, mySide, address, publicClient, writeContractAsync, getOrderId]);
+
+  const canDeposit =
     SWAP_ESCROW_ENABLED &&
     !!room &&
     room.status === "both_confirmed" &&
     !!mySide &&
-    !!address;
+    !!address &&
+    (mySide === "B" ? !!room.sideA.address : true);
 
-  return { execute, pending, error, canExecute };
+  return {
+    deposit,
+    withdraw,
+    pending,
+    error,
+    canDeposit,
+    withdrawTimeoutHours: WITHDRAW_TIMEOUT_SEC / 3600,
+  };
 }

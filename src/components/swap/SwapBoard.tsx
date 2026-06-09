@@ -135,8 +135,13 @@ export function SwapBoard({ initialRoomId }: { initialRoomId?: string }) {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const { execute, pending: execPending, error: execError, canExecute } =
-    useSwapExecute(room, mySide);
+  const {
+    deposit,
+    pending: chainPending,
+    error: chainError,
+    canDeposit,
+    withdrawTimeoutHours,
+  } = useSwapExecute(room, mySide);
 
   const selfFilled = myParty?.slots.filter(Boolean).length ?? 0;
 
@@ -298,21 +303,28 @@ export function SwapBoard({ initialRoomId }: { initialRoomId?: string }) {
             </section>
           </div>
 
-          {canExecute && (
+          {canDeposit && (
             <div className="rounded-2xl border border-gold/40 bg-gold/10 p-5 text-center">
-              <p className="mb-3 text-sm text-white/70">{t("executeHint")}</p>
+              <p className="mb-2 text-sm text-white/70">{t("depositHint")}</p>
+              <p className="mb-4 text-xs text-white/45">{t("depositAtomicNote")}</p>
               <button
                 type="button"
-                disabled={execPending}
-                onClick={execute}
+                disabled={chainPending}
+                onClick={deposit}
                 className="rounded-full bg-gold px-8 py-3 text-sm font-bold text-ink disabled:opacity-40"
               >
-                {execPending ? t("executing") : t("executeSwap")}
+                {chainPending ? t("executing") : t("depositNfts")}
               </button>
-              {execError && (
+              {chainError && (
                 <p className="mt-2 text-xs text-red-400">{t("executeFailed")}</p>
               )}
             </div>
+          )}
+
+          {SWAP_ESCROW_ENABLED && room.status === "both_confirmed" && isConnected && (
+            <p className="text-center text-xs text-white/35">
+              {t("withdrawHint", { hours: withdrawTimeoutHours })}
+            </p>
           )}
 
         </>
