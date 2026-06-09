@@ -134,6 +134,7 @@
     "executeFailed": "链上交易失败，请检查授权与网络",
     "chatTitle": "房间聊天",
     "chatEmpty": "暂无消息，和对方打个招呼吧",
+    "chatSendFailed": "消息发送失败，请刷新页面后重试",
     "chatNickname": "昵称",
     "chatPlaceholder": "输入消息…",
     "chatSend": "发送",

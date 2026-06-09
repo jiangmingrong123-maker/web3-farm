@@ -134,6 +134,7 @@
     "executeFailed": "Transaction failed — check approvals and network",
     "chatTitle": "Room chat",
     "chatEmpty": "No messages yet — say hi",
+    "chatSendFailed": "Failed to send — refresh and try again",
     "chatNickname": "Nickname",
     "chatPlaceholder": "Type a message…",
     "chatSend": "Send",

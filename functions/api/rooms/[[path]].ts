@@ -131,13 +131,20 @@ function unlockParties(room: StoredRoom) {
   }
 }
 
+/** Cloudflare [[path]] is a single string e.g. "94c93948/messages", not an array. */
+function pathSegments(raw: string | string[] | undefined): string[] {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw;
+  return raw.split("/").filter(Boolean);
+}
+
 export const onRequest = async (context: {
   request: Request;
   env: Env;
   params: Record<string, string | string[] | undefined>;
 }) => {
   const { request, env, params } = context;
-  const path = (params.path as string[] | undefined) ?? [];
+  const path = pathSegments(params.path as string | string[] | undefined);
   const method = request.method;
   const url = new URL(request.url);
 

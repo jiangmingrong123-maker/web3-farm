@@ -24,10 +24,57 @@ export type VerifyNftError =
   | "RPC_ERROR"
   | "NOT_FOUND";
 
+/** Browser-friendly mainnet RPC (default viem URL often fails CORS in the client). */
+const MAINNET_RPC =
+  process.env.NEXT_PUBLIC_ETH_RPC_URL ?? "https://ethereum.publicnode.com";
+
 const client = createPublicClient({
   chain: mainnet,
-  transport: http(),
+  transport: http(MAINNET_RPC, { timeout: 30_000 }),
 });
+
+type ApiVerifyResponse =
+  | {
+      ok: true;
+      nft: Omit<VerifiedNft, "tokenId" | "verified"> & {
+        tokenId: string;
+        verified: true;
+      };
+    }
+  | { ok: false; error: VerifyNftError };
+
+async function verifyViaApi(
+  contractAddress: string,
+  tokenIdInput: string,
+  walletAddress: Address,
+): Promise<{ ok: true; nft: VerifiedNft } | { ok: false; error: VerifyNftError } | null> {
+  try {
+    const res = await fetch("/api/nft/verify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contract: contractAddress,
+        tokenId: tokenIdInput,
+        wallet: walletAddress,
+      }),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as ApiVerifyResponse;
+    if (!data.ok) return { ok: false, error: data.error };
+    return {
+      ok: true,
+      nft: {
+        ...data.nft,
+        contract: data.nft.contract as `0x${string}`,
+        tokenId: BigInt(data.nft.tokenId),
+        owner: data.nft.owner as Address,
+        verified: true,
+      },
+    };
+  } catch {
+    return null;
+  }
+}
 
 export async function verifyNftOwnership(
   contractAddress: string,
@@ -47,6 +94,9 @@ export async function verifyNftOwnership(
   } catch {
     return { ok: false, error: "INVALID_TOKEN_ID" };
   }
+
+  const apiResult = await verifyViaApi(normalized, tokenIdInput, walletAddress);
+  if (apiResult) return apiResult;
 
   const collection = getCollectionByContract(normalized);
   const contract = normalized as `0x${string}`;
@@ -89,7 +139,15 @@ export async function verifyNftOwnership(
         verified: true,
       },
     };
-  } catch {
-    return { ok: false, error: "NOT_FOUND" };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (
+      msg.includes("revert") ||
+      msg.includes("ERC721") ||
+      msg.includes("nonexistent")
+    ) {
+      return { ok: false, error: "NOT_FOUND" };
+    }
+    return { ok: false, error: "RPC_ERROR" };
   }
 }

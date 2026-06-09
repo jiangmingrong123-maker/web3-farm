@@ -411,7 +411,14 @@ export function SwapBoard({ initialRoomId }: { initialRoomId?: string }) {
             roomId={roomId}
             messages={room.messages}
             address={address}
-            onSent={() => refresh(roomId)}
+            onSent={(msg) => {
+              if (msg) {
+                setRoom((r) =>
+                  r ? { ...r, messages: [...r.messages, msg] } : r,
+                );
+              }
+              refresh(roomId);
+            }}
           />
         </>
       )}

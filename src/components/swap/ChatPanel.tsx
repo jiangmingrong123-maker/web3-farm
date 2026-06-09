@@ -10,7 +10,7 @@ interface ChatPanelProps {
   messages: ChatMessage[];
   address?: string;
   nickname?: string;
-  onSent?: () => void;
+  onSent?: (msg: ChatMessage | null) => void;
 }
 
 export function ChatPanel({ roomId, messages, address, nickname, onSent }: ChatPanelProps) {
@@ -18,6 +18,7 @@ export function ChatPanel({ roomId, messages, address, nickname, onSent }: ChatP
   const [text, setText] = useState("");
   const [name, setName] = useState(nickname ?? "");
   const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -28,9 +29,14 @@ export function ChatPanel({ roomId, messages, address, nickname, onSent }: ChatP
     const trimmed = text.trim();
     if (!trimmed) return;
     setSending(true);
-    await sendMessageApi(roomId, trimmed, name || t("guestName"), { address });
-    setText("");
-    onSent?.();
+    setSendError(false);
+    const msg = await sendMessageApi(roomId, trimmed, name || t("guestName"), { address });
+    if (msg) {
+      setText("");
+      onSent?.(msg);
+    } else {
+      setSendError(true);
+    }
     setSending(false);
   };
 
@@ -52,6 +58,10 @@ export function ChatPanel({ roomId, messages, address, nickname, onSent }: ChatP
         )}
         <div ref={bottomRef} />
       </div>
+
+      {sendError && (
+        <p className="mb-2 text-xs text-red-400">{t("chatSendFailed")}</p>
+      )}
 
       <div className="flex flex-col gap-2 sm:flex-row">
         <input
