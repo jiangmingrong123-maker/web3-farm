@@ -30,9 +30,11 @@
 | 交换页 UI（双栏 4 格） | ✅ |
 | 白名单 + ownerOf 校验 | ✅ |
 | 链上元数据图片 | ✅（ipfs/https） |
-| 房间链接分享 | ✅（UI） |
-| 跨用户房间同步 | ⏳ 需部署 `NFTSwapEscrow` 或后端 |
-| 原子交换执行 | ⏳ 合约见 `contracts/NFTSwapEscrow.sol` |
+| 无钱包创建房间 | ✅ |
+| 房间链接分享 | ✅ |
+| 跨用户房间同步 | ✅（Cloudflare KV + `/api/rooms`） |
+| 房间聊天 | ✅ |
+| 原子交换执行 | ⏳ 部署合约 + `NEXT_PUBLIC_SWAP_CONTRACT` |
 
 部署合约后，在 Cloudflare / `.env` 设置：
 

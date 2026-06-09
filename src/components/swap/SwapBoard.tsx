@@ -5,38 +5,67 @@ import { useTranslations } from "next-intl";
 import { useAccount } from "wagmi";
 import { SWAP_ESCROW_ENABLED, SWAP_SLOTS_PER_SIDE } from "@/config/swap";
 import type { VerifiedNft } from "@/lib/nft/verify";
+import type { ApiRoom } from "@/lib/swap/api-types";
 import {
-  createEmptyRoom,
-  createRoomId,
-  hydrateRoom,
-  loadRoom,
-  saveRoom,
-  serializeRoom,
-} from "@/lib/swap/room";
-import type { SwapRoom } from "@/lib/swap/types";
+  counterSide,
+  createRoomApi,
+  fetchRoomApi,
+  getParty,
+  resolveMySide,
+  saveCreatorToken,
+  updatePartyApi,
+  verifiedToApiSlot,
+} from "@/lib/swap/api";
+import { useSwapExecute } from "@/lib/swap/use-swap-execute";
 import { AddNftPanel } from "./AddNftPanel";
+import { ChatPanel } from "./ChatPanel";
 import { SwapSlot } from "./SwapSlot";
+
+function getCreatorTokenFromStorage(roomId: string): string | null {
+  if (typeof window === "undefined") return null;
+  return sessionStorage.getItem(`swap_creator_${roomId}`);
+}
 
 export function SwapBoard({ initialRoomId }: { initialRoomId?: string }) {
   const t = useTranslations("swap");
   const { address, isConnected } = useAccount();
   const [roomId, setRoomId] = useState(initialRoomId ?? "");
-  const [room, setRoom] = useState<SwapRoom | null>(null);
+  const [room, setRoom] = useState<ApiRoom | null>(null);
   const [addingSlot, setAddingSlot] = useState<number | null>(null);
   const [copied, setCopied] = useState(false);
+  const [creating, setCreating] = useState(false);
+
+  const creatorToken = roomId ? getCreatorTokenFromStorage(roomId) : null;
+  const mySide = room ? resolveMySide(room, address, creatorToken) : null;
+  const theirSide = mySide ? counterSide(mySide) : null;
+
+  const refresh = useCallback(async (id: string) => {
+    const data = await fetchRoomApi(id);
+    if (data) setRoom(data);
+  }, []);
 
   useEffect(() => {
     if (initialRoomId) {
       setRoomId(initialRoomId);
-      setRoom(hydrateRoom(loadRoom(initialRoomId)));
+      refresh(initialRoomId);
     }
-  }, [initialRoomId]);
+  }, [initialRoomId, refresh]);
 
-  const persist = useCallback((next: SwapRoom) => {
-    const serialized = serializeRoom(next);
-    saveRoom(serialized);
-    setRoom(hydrateRoom(serialized));
-  }, []);
+  useEffect(() => {
+    if (!roomId) return;
+    const id = setInterval(() => refresh(roomId), 3000);
+    return () => clearInterval(id);
+  }, [roomId, refresh]);
+
+  useEffect(() => {
+    if (!roomId || !room || !address || !mySide) return;
+    const party = getParty(room, mySide);
+    if (party.address?.toLowerCase() === address.toLowerCase()) return;
+    updatePartyApi(roomId, mySide, { ...party, address }, {
+      address,
+      creatorToken: creatorToken ?? undefined,
+    }).then((updated) => updated && setRoom(updated));
+  }, [roomId, room, address, mySide, creatorToken]);
 
   const shareUrl = useMemo(() => {
     if (!roomId || typeof window === "undefined") return "";
@@ -44,60 +73,59 @@ export function SwapBoard({ initialRoomId }: { initialRoomId?: string }) {
     return `${base}?room=${roomId}`;
   }, [roomId]);
 
-  const handleCreateRoom = () => {
-    const id = createRoomId();
-    const next = createEmptyRoom(id);
-    setRoomId(id);
-    persist(next);
+  const handleCreateRoom = async () => {
+    setCreating(true);
+    const res = await createRoomApi();
+    saveCreatorToken(res.id, res.creatorToken);
+    setRoomId(res.id);
+    setRoom(res.room);
     const url = new URL(window.location.href);
-    url.searchParams.set("room", id);
+    url.searchParams.set("room", res.id);
     window.history.replaceState({}, "", url.toString());
+    setCreating(false);
   };
 
-  const handleAddNft = (slotIndex: number, nft: VerifiedNft) => {
-    if (!room || !address) return;
-    const slots = [...room.self.slots];
-    slots[slotIndex] = { nft, locked: false };
-    persist({
-      ...room,
-      self: { ...room.self, address, slots, confirmed: false },
+  const myParty = mySide && room ? getParty(room, mySide) : null;
+  const theirParty = theirSide && room ? getParty(room, theirSide) : null;
+
+  const persistParty = async (
+    patch: Parameters<typeof updatePartyApi>[2],
+  ) => {
+    if (!roomId || !mySide) return;
+    const updated = await updatePartyApi(roomId, mySide, patch, {
+      address,
+      creatorToken: creatorToken ?? undefined,
     });
+    if (updated) setRoom(updated);
+  };
+
+  const handleAddNft = async (slotIndex: number, nft: VerifiedNft) => {
+    if (!myParty || !mySide || myParty.confirmed) return;
+    const slots = [...myParty.slots];
+    slots[slotIndex] = verifiedToApiSlot(nft, false);
+    await persistParty({ slots, confirmed: false });
     setAddingSlot(null);
   };
 
-  const handleRemove = (slotIndex: number) => {
-    if (!room || room.self.confirmed) return;
-    const slots = [...room.self.slots];
+  const handleRemove = async (slotIndex: number) => {
+    if (!myParty || myParty.confirmed) return;
+    const slots = [...myParty.slots];
     slots[slotIndex] = null;
-    persist({
-      ...room,
-      self: { ...room.self, slots, confirmed: false },
-    });
+    await persistParty({ slots, confirmed: false });
   };
 
-  const handleConfirm = () => {
-    if (!room || !address) return;
-    const hasNft = room.self.slots.some(Boolean);
+  const handleConfirm = async () => {
+    if (!myParty) return;
+    const hasNft = myParty.slots.some(Boolean);
     if (!hasNft) return;
-    const slots = room.self.slots.map((s) =>
-      s ? { ...s, locked: true } : null,
-    );
-    persist({
-      ...room,
-      self: { ...room.self, address, slots, confirmed: true },
-    });
+    const slots = myParty.slots.map((s) => (s ? { ...s, locked: true } : null));
+    await persistParty({ slots, confirmed: true });
   };
 
-  const handleResetConfirm = () => {
-    if (!room) return;
-    const slots = room.self.slots.map((s) =>
-      s ? { ...s, locked: false } : null,
-    );
-    persist({
-      ...room,
-      self: { ...room.self, slots, confirmed: false },
-      status: "open",
-    });
+  const handleResetConfirm = async () => {
+    if (!myParty) return;
+    const slots = myParty.slots.map((s) => (s ? { ...s, locked: false } : null));
+    await persistParty({ slots, confirmed: false });
   };
 
   const handleCopy = async () => {
@@ -107,11 +135,31 @@ export function SwapBoard({ initialRoomId }: { initialRoomId?: string }) {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const selfFilled = room?.self.slots.filter(Boolean).length ?? 0;
+  const { execute, pending: execPending, error: execError, canExecute } =
+    useSwapExecute(room, mySide);
+
+  const selfFilled = myParty?.slots.filter(Boolean).length ?? 0;
+
+  const apiNftToSlotItem = (slot: NonNullable<typeof myParty>["slots"][0]) => {
+    if (!slot) return null;
+    return {
+      nft: {
+        contract: slot.contract as `0x${string}`,
+        tokenId: BigInt(slot.tokenId),
+        owner: "0x" as `0x${string}`,
+        collectionName: slot.collectionName,
+        collectionSlug: slot.collectionSlug,
+        chainId: 1,
+        tokenUri: null,
+        imageUrl: slot.imageUrl,
+        verified: true as const,
+      },
+      locked: slot.locked,
+    };
+  };
 
   return (
     <div className="space-y-8">
-      {/* security banner */}
       <section className="rounded-2xl border border-emerald-500/25 bg-emerald-500/5 p-5">
         <h2 className="mb-2 text-sm font-bold text-emerald-300">{t("securityTitle")}</h2>
         <ul className="list-inside list-disc space-y-1 text-xs leading-relaxed text-white/50">
@@ -122,7 +170,6 @@ export function SwapBoard({ initialRoomId }: { initialRoomId?: string }) {
         </ul>
       </section>
 
-      {/* room bar */}
       <section className="flex flex-col gap-4 rounded-2xl border border-white/10 bg-surface/50 p-5 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="text-xs tracking-widest text-gold/70">{t("badge")}</p>
@@ -134,10 +181,10 @@ export function SwapBoard({ initialRoomId }: { initialRoomId?: string }) {
             <button
               type="button"
               onClick={handleCreateRoom}
-              disabled={!isConnected}
+              disabled={creating}
               className="rounded-full bg-gold px-5 py-2.5 text-sm font-bold text-ink disabled:opacity-40"
             >
-              {t("createRoom")}
+              {creating ? t("creating") : t("createRoom")}
             </button>
           ) : (
             <>
@@ -156,88 +203,130 @@ export function SwapBoard({ initialRoomId }: { initialRoomId?: string }) {
         </div>
       </section>
 
+      {!roomId && (
+        <p className="text-xs text-white/40">{t("createWithoutWallet")}</p>
+      )}
+
       {!SWAP_ESCROW_ENABLED && (
         <p className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs text-amber-200/90">
           {t("escrowPending")}
         </p>
       )}
 
-      {room && (
-        <div className="grid gap-6 lg:grid-cols-2">
-          {/* your side */}
-          <section className="rounded-2xl border border-gold/25 bg-black/30 p-4">
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="font-bold text-gold">{t("yourSide")}</h2>
-              <span className="text-xs text-white/40">
-                {selfFilled}/{SWAP_SLOTS_PER_SIDE}
-              </span>
-            </div>
-
-            <div className="mb-4 grid grid-cols-2 gap-3">
-              {room.self.slots.map((item, i) => (
-                <SwapSlot
-                  key={i}
-                  index={i}
-                  item={item}
-                  editable={!room.self.confirmed}
-                  onAdd={() => setAddingSlot(i)}
-                  onRemove={() => handleRemove(i)}
-                />
-              ))}
-            </div>
-
-            {addingSlot !== null && !room.self.confirmed && (
-              <div className="mb-4">
-                <AddNftPanel
-                  onAdded={(nft) => handleAddNft(addingSlot, nft)}
-                  onCancel={() => setAddingSlot(null)}
-                />
+      {room && myParty && (
+        <>
+          <div className="grid gap-6 lg:grid-cols-2">
+            <section className="rounded-2xl border border-gold/25 bg-black/30 p-4">
+              <div className="mb-4 flex items-center justify-between">
+                <h2 className="font-bold text-gold">{t("yourSide")}</h2>
+                <span className="text-xs text-white/40">
+                  {selfFilled}/{SWAP_SLOTS_PER_SIDE}
+                  {!isConnected && " · " + t("connectToAdd")}
+                </span>
               </div>
-            )}
 
-            <div className="flex gap-2">
-              {!room.self.confirmed ? (
-                <button
-                  type="button"
-                  disabled={selfFilled === 0}
-                  onClick={handleConfirm}
-                  className="flex-1 rounded-full bg-gold px-4 py-2.5 text-sm font-bold text-ink disabled:opacity-40"
-                >
-                  {t("confirmSide")}
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={handleResetConfirm}
-                  className="flex-1 rounded-full border border-white/20 px-4 py-2.5 text-sm text-white/70"
-                >
-                  {t("revokeConfirm")}
-                </button>
+              <div className="mb-4 grid grid-cols-2 gap-3">
+                {myParty.slots.map((item, i) => (
+                  <SwapSlot
+                    key={i}
+                    index={i}
+                    item={apiNftToSlotItem(item)}
+                    editable={isConnected && !myParty.confirmed}
+                    onAdd={() => isConnected && setAddingSlot(i)}
+                    onRemove={() => handleRemove(i)}
+                  />
+                ))}
+              </div>
+
+              {addingSlot !== null && isConnected && !myParty.confirmed && (
+                <div className="mb-4">
+                  <AddNftPanel
+                    onAdded={(nft) => handleAddNft(addingSlot, nft)}
+                    onCancel={() => setAddingSlot(null)}
+                  />
+                </div>
+              )}
+
+              <div className="flex gap-2">
+                {!myParty.confirmed ? (
+                  <button
+                    type="button"
+                    disabled={!isConnected || selfFilled === 0}
+                    onClick={handleConfirm}
+                    className="flex-1 rounded-full bg-gold px-4 py-2.5 text-sm font-bold text-ink disabled:opacity-40"
+                  >
+                    {t("confirmSide")}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={!isConnected}
+                    onClick={handleResetConfirm}
+                    className="flex-1 rounded-full border border-white/20 px-4 py-2.5 text-sm text-white/70"
+                  >
+                    {t("revokeConfirm")}
+                  </button>
+                )}
+              </div>
+            </section>
+
+            <section className="rounded-2xl border border-white/10 bg-black/20 p-4">
+              <div className="mb-4 flex items-center justify-between">
+                <h2 className="font-bold text-white/70">{t("theirSide")}</h2>
+                <span className="text-xs text-white/30">
+                  {theirParty?.address
+                    ? `${theirParty.address.slice(0, 6)}…${theirParty.address.slice(-4)}`
+                    : t("waitingJoin")}
+                  {theirParty?.confirmed && ` · ${t("confirmed")}`}
+                </span>
+              </div>
+
+              <div className="mb-4 grid grid-cols-2 gap-3">
+                {(theirParty?.slots ?? []).map((item, i) => (
+                  <SwapSlot
+                    key={i}
+                    index={i}
+                    item={apiNftToSlotItem(item)}
+                    editable={false}
+                  />
+                ))}
+              </div>
+
+              <p className="rounded-lg bg-white/5 px-3 py-3 text-xs leading-relaxed text-white/40">
+                {t("counterpartyHint")}
+              </p>
+            </section>
+          </div>
+
+          {canExecute && (
+            <div className="rounded-2xl border border-gold/40 bg-gold/10 p-5 text-center">
+              <p className="mb-3 text-sm text-white/70">{t("executeHint")}</p>
+              <button
+                type="button"
+                disabled={execPending}
+                onClick={execute}
+                className="rounded-full bg-gold px-8 py-3 text-sm font-bold text-ink disabled:opacity-40"
+              >
+                {execPending ? t("executing") : t("executeSwap")}
+              </button>
+              {execError && (
+                <p className="mt-2 text-xs text-red-400">{t("executeFailed")}</p>
               )}
             </div>
-          </section>
+          )}
 
-          {/* counterparty */}
-          <section className="rounded-2xl border border-white/10 bg-black/20 p-4">
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="font-bold text-white/70">{t("theirSide")}</h2>
-              <span className="text-xs text-white/30">{t("waitingJoin")}</span>
-            </div>
-
-            <div className="mb-4 grid grid-cols-2 gap-3">
-              {room.counterparty.slots.map((item, i) => (
-                <SwapSlot key={i} index={i} item={item} editable={false} />
-              ))}
-            </div>
-
-            <p className="rounded-lg bg-white/5 px-3 py-3 text-xs leading-relaxed text-white/40">
-              {t("counterpartyHint")}
-            </p>
-          </section>
-        </div>
+          <ChatPanel
+            roomId={roomId}
+            messages={room.messages}
+            address={address}
+          />
+        </>
       )}
 
-      {/* flow */}
+      {room && !mySide && isConnected && (
+        <p className="text-sm text-amber-200/80">{t("claimingSide")}</p>
+      )}
+
       <section className="rounded-2xl border border-white/8 bg-black/30 p-5 text-sm text-white/45">
         <h3 className="mb-2 font-semibold text-white/70">{t("flowTitle")}</h3>
         <ol className="list-inside list-decimal space-y-1">
