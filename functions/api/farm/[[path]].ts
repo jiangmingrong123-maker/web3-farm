@@ -1,8 +1,16 @@
 /**
- * GET  /api/farm/:wallet           — load Season 0 state
- * PUT  /api/farm/:wallet           — save state
- * POST /api/farm/:wallet/charge-swap — deduct swap fee (idempotent per room)
+ * GET  /api/farm/:wallet              — load Season 0 state
+ * PUT  /api/farm/:wallet              — save state
+ * POST /api/farm/:wallet/charge-swap    — deduct swap fee (idempotent per room)
+ * POST /api/farm/:wallet/sync-bindings — verify bound NFTs on-chain, drop sold/transferred
  */
+
+const RPC_URLS = [
+  "https://ethereum.publicnode.com",
+  "https://1rpc.io/eth",
+  "https://eth.drpc.org",
+  "https://rpc.ankr.com/eth",
+];
 
 const INITIAL_UNLOCKED_SLOTS = 2;
 const DAILY_POINTS_CAP = 1000;
@@ -187,6 +195,69 @@ function pathSegments(raw: string | string[] | undefined): string[] {
   return raw.split("/").filter(Boolean);
 }
 
+function encodeOwnerOf(tokenId: string): string {
+  const id = BigInt(tokenId);
+  const selector = "6352211e";
+  const hex = id.toString(16).padStart(64, "0");
+  return `0x${selector}${hex}`;
+}
+
+function decodeAddress(hex: string): string | null {
+  const clean = hex.replace(/^0x/, "");
+  if (clean.length < 40) return null;
+  return `0x${clean.slice(-40)}`.toLowerCase();
+}
+
+async function ethOwnerOf(contract: string, tokenId: string): Promise<string | null> {
+  const data = encodeOwnerOf(tokenId);
+  for (const rpc of RPC_URLS) {
+    try {
+      const res = await fetch(rpc, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "eth_call",
+          params: [{ to: contract, data }, "latest"],
+        }),
+        signal: AbortSignal.timeout(20_000),
+      });
+      if (!res.ok) continue;
+      const body = (await res.json()) as { result?: string; error?: unknown };
+      if (!body.result || body.result === "0x") return null;
+      return decodeAddress(body.result);
+    } catch {
+      /* next rpc */
+    }
+  }
+  return null;
+}
+
+async function purgeStaleBindings(
+  state: FarmState,
+  wallet: string,
+): Promise<{
+  state: FarmState;
+  removed: { slot: number; name: string; tokenId: string }[];
+}> {
+  const boundSlots = { ...state.boundSlots };
+  const removed: { slot: number; name: string; tokenId: string }[] = [];
+
+  for (const [key, nft] of Object.entries(boundSlots)) {
+    if (!nft) continue;
+    const slot = Number(key);
+    const owner = await ethOwnerOf(nft.contract.toLowerCase(), nft.tokenId);
+    if (!owner || owner !== wallet) {
+      boundSlots[slot] = null;
+      removed.push({ slot, name: nft.name, tokenId: nft.tokenId });
+    }
+  }
+
+  const next = syncAccrual({ ...state, boundSlots }, Date.now());
+  return { state: next, removed };
+}
+
 export const onRequest = async (context: {
   request: Request;
   env: Env;
@@ -207,6 +278,15 @@ export const onRequest = async (context: {
     if (!body.state) return new Response("Missing state", { status: 400 });
     const saved = await saveFarm(env, wallet, sanitizeState(body.state));
     return json({ ok: true, state: saved });
+  }
+
+  if (path[1] === "sync-bindings" && request.method === "POST") {
+    const loaded = await loadFarm(env, wallet);
+    const base = loaded.exists ? loaded.state : defaultState();
+    const synced = syncAccrual(base, Date.now());
+    const { state, removed } = await purgeStaleBindings(synced, wallet);
+    const saved = await saveFarm(env, wallet, state);
+    return json({ ok: true, state: saved, removed });
   }
 
   if (path[1] === "charge-swap" && request.method === "POST") {

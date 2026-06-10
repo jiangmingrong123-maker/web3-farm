@@ -10,7 +10,12 @@ import {
   SLOT_UNLOCK_COSTS,
 } from "@/config/slots";
 import { getCollectionByContract } from "@/config/collections";
-import { fetchFarmStateApi, saveFarmStateApi } from "@/lib/farm-api";
+import {
+  fetchFarmStateApi,
+  saveFarmStateApi,
+  syncFarmBindingsApi,
+  syncFarmBindingsClient,
+} from "@/lib/farm-api";
 import {
   accrualStopped,
   bindNftToSlot,
@@ -47,7 +52,21 @@ export function PointsHall({ locale }: { locale: string }) {
   const [bindingSlot, setBindingSlot] = useState<number | null>(null);
   const [bindError, setBindError] = useState<string | null>(null);
   const [syncError, setSyncError] = useState(false);
+  const [bindingsRemoved, setBindingsRemoved] = useState<string[]>([]);
   const [, setTick] = useState(0);
+
+  const verifyAndSyncBindings = useCallback(
+    async (wallet: string, current: FarmState): Promise<FarmState> => {
+      const api = await syncFarmBindingsApi(wallet);
+      const result =
+        api ?? (await syncFarmBindingsClient(wallet as `0x${string}`, current));
+      if (result.removed.length > 0) {
+        setBindingsRemoved(result.removed.map((r) => r.name));
+      }
+      return result.state;
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!address) {
@@ -71,6 +90,7 @@ export function PointsHall({ locale }: { locale: string }) {
         };
       }
 
+      merged = await verifyAndSyncBindings(address, merged);
       if (cancelled) return;
       setState(merged);
       saveFarmState(address, merged);
@@ -88,7 +108,7 @@ export function PointsHall({ locale }: { locale: string }) {
     return () => {
       cancelled = true;
     };
-  }, [address]);
+  }, [address, verifyAndSyncBindings]);
 
   useEffect(() => {
     const id = setInterval(() => {
@@ -122,7 +142,9 @@ export function PointsHall({ locale }: { locale: string }) {
 
   const handleClaim = async () => {
     if (!isConnected || !address || !state) return;
-    const next = performClaim(state);
+    const synced = await verifyAndSyncBindings(address, state);
+    const base = await persist(synced);
+    const next = performClaim(base);
     if (next) await persist(next);
   };
 
@@ -217,6 +239,12 @@ export function PointsHall({ locale }: { locale: string }) {
                 <p className="mt-1 text-[10px] text-amber-400/90">{t("accrualStopped")}</p>
               )}
             </div>
+
+            {bindingsRemoved.length > 0 && (
+              <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-center text-[11px] text-amber-200">
+                {t("bindingsRemoved", { names: bindingsRemoved.join(", ") })}
+              </p>
+            )}
 
             {syncError && (
               <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-center text-[11px] text-red-300">
@@ -325,6 +353,7 @@ export function PointsHall({ locale }: { locale: string }) {
           <li>{t("rule3")}</li>
           <li>{t("rule4")}</li>
           <li>{t("rule5")}</li>
+          <li>{t("rule6")}</li>
         </ul>
       </section>
     </div>

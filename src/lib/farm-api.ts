@@ -1,4 +1,7 @@
-import type { FarmState } from "./farm-storage";
+import type { FarmState, RemovedBinding } from "./farm-storage";
+import { verifyNftOwnership } from "./nft/verify";
+import type { Address } from "viem";
+import { pruneBindingsLocally, syncAccrual } from "./farm-storage";
 
 const API = "/api/farm";
 
@@ -63,6 +66,54 @@ export type ChargeSwapResult =
       need?: number;
       have?: number;
     };
+
+export async function syncFarmBindingsApi(
+  wallet: string,
+): Promise<{ state: FarmState; removed: RemovedBinding[] } | null> {
+  try {
+    const res = await fetch(`${API}/${wallet.toLowerCase()}/sync-bindings`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      ok?: boolean;
+      state?: FarmState;
+      removed?: RemovedBinding[];
+    };
+    if (!data.ok || !data.state) return null;
+    return { state: data.state, removed: data.removed ?? [] };
+  } catch {
+    return null;
+  }
+}
+
+/** Client fallback when farm sync-bindings API is unavailable (e.g. local dev). */
+export async function syncFarmBindingsClient(
+  wallet: Address,
+  state: FarmState,
+): Promise<{ state: FarmState; removed: RemovedBinding[] }> {
+  const toClear: number[] = [];
+  const names: Record<number, string> = {};
+  const tokenIds: Record<number, string> = {};
+
+  for (const [key, nft] of Object.entries(state.boundSlots)) {
+    if (!nft) continue;
+    const slot = Number(key);
+    const result = await verifyNftOwnership(nft.contract, nft.tokenId, wallet);
+    if (!result.ok) {
+      toClear.push(slot);
+      names[slot] = nft.name;
+      tokenIds[slot] = nft.tokenId;
+    }
+  }
+
+  if (toClear.length === 0) {
+    return { state: syncAccrual(state, Date.now()), removed: [] };
+  }
+  return pruneBindingsLocally(state, toClear, names, tokenIds);
+}
 
 export async function chargeSwapFeeApi(
   wallet: string,

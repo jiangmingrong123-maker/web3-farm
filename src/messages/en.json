@@ -99,6 +99,8 @@
     "rule3": "2 slots free; only the next 2 unlock costs are shown, later slots stay hidden",
     "rule4": "Each bound Nobody +100 pts/day (10 pts/day base without bindings)",
     "rule5": "Points sync by wallet address in the cloud — same wallet on any device",
+    "rule6": "NFTs must stay in the bound wallet; sold or transferred NFTs are auto-unbound on visit/claim",
+    "bindingsRemoved": "These NFTs are no longer in your wallet — unbound, accrual stopped: {names}",
     "syncFailed": "Cloud sync failed — check network and try again (points may not be saved)"
   },
   "swap": {

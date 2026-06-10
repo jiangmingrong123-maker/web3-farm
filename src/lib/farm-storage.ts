@@ -216,6 +216,32 @@ function laterClaimAt(a: number | null, b: number | null): number | null {
 }
 
 /** Merge local + remote when both may have changes (e.g. offline claim). */
+export type RemovedBinding = { slot: number; name: string; tokenId: string };
+
+export function pruneBindingsLocally(
+  state: FarmState,
+  slotsToClear: number[],
+  names: Record<number, string>,
+  tokenIds: Record<number, string>,
+): { state: FarmState; removed: RemovedBinding[] } {
+  const boundSlots = { ...state.boundSlots };
+  const removed: RemovedBinding[] = [];
+  for (const slot of slotsToClear) {
+    const nft = boundSlots[slot];
+    if (!nft) continue;
+    boundSlots[slot] = null;
+    removed.push({
+      slot,
+      name: names[slot] ?? nft.name,
+      tokenId: tokenIds[slot] ?? nft.tokenId,
+    });
+  }
+  return {
+    state: syncAccrual({ ...state, boundSlots }, Date.now()),
+    removed,
+  };
+}
+
 export function mergeFarmStates(local: FarmState, remote: FarmState): FarmState {
   const boundSlots = { ...remote.boundSlots, ...local.boundSlots };
   return syncAccrual(
