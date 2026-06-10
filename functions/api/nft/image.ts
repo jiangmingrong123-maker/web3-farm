@@ -14,7 +14,8 @@ const NOBODY = {
   imageCid: "QmWAVSATUtHMZMtrcGcAjkdWJjVLFWipMrNWMvTECYNPiy",
 };
 
-const FETCH_MS = 8_000;
+const FETCH_MS = 12_000;
+const META_MS = 15_000;
 
 const GATEWAYS = [
   "https://dweb.link/ipfs/",
@@ -25,18 +26,41 @@ const GATEWAYS = [
   "https://ipfs.filebase.io/ipfs/",
 ];
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 function isImageBytes(buf: ArrayBuffer): boolean {
   const u = new Uint8Array(buf);
   if (u.length < 12) return false;
   if (u[0] === 0x89 && u[1] === 0x50 && u[2] === 0x4e && u[3] === 0x47) return true;
   if (u[0] === 0xff && u[1] === 0xd8 && u[2] === 0xff) return true;
   if (u[0] === 0x47 && u[1] === 0x49 && u[2] === 0x46) return true;
-  if (u[0] === 0x52 && u[1] === 0x49 && u[2] === 0x46 && u[3] === 0x46) return true;
+  if (u[0] === 0x52 && u[1] === 0x49 && u[2] === 0x46 && u[3] === 0x46) {
+    if (u.length >= 12) {
+      const tag = String.fromCharCode(u[8], u[9], u[10], u[11]);
+      if (tag === "WEBP") return true;
+    }
+    return true;
+  }
   return false;
+}
+
+function redirectImage(url: string, source: string): Response {
+  return new Response(null, {
+    status: 302,
+    headers: {
+      Location: url,
+      "Cache-Control": "public, max-age=86400",
+      "X-Image-Source": source,
+    },
+  });
+}
+
+function pickCdnUrl(urls: string[]): string | null {
+  for (const u of urls) {
+    if (u.startsWith("http") && isCdnUrl(u)) return u;
+  }
+  for (const u of urls) {
+    if (u.startsWith("http")) return u;
+  }
+  return null;
 }
 
 function isCdnUrl(url: string): boolean {
@@ -148,37 +172,50 @@ async function nobodyImageUri(tokenId: string): Promise<string> {
   return `ipfs://${NOBODY.imageCid}/${tokenId}.png`;
 }
 
+async function fetchOpenSeaMeta(
+  contract: string,
+  tokenId: string,
+  apiKey: string,
+): Promise<string[]> {
+  const endpoint = `https://api.opensea.io/api/v2/chain/ethereum/contract/${contract}/nfts/${tokenId}`;
+  const res = await fetch(endpoint, {
+    signal: AbortSignal.timeout(META_MS),
+    headers: {
+      Accept: "application/json",
+      "X-API-KEY": apiKey,
+      "x-api-key": apiKey,
+    },
+  });
+  if (!res.ok) return [];
+
+  const data = (await res.json()) as {
+    nft?: {
+      image_url?: string;
+      display_image_url?: string;
+      metadata_url?: string;
+    };
+    image_url?: string;
+    display_image_url?: string;
+  };
+
+  return [
+    data.nft?.display_image_url,
+    data.nft?.image_url,
+    data.display_image_url,
+    data.image_url,
+  ].filter((u): u is string => !!u);
+}
+
 async function tryOpenSea(
   contract: string,
   tokenId: string,
   apiKey: string,
 ): Promise<Response | null> {
   try {
-    const res = await fetchWithTimeout(
-      `https://api.opensea.io/api/v2/chain/ethereum/contract/${contract}/nfts/${tokenId}`,
-      {
-        headers: {
-          Accept: "application/json",
-          "x-api-key": apiKey,
-        },
-      },
-    );
-    if (!res.ok) return null;
-
-    const data = (await res.json()) as {
-      nft?: { image_url?: string; display_image_url?: string };
-      image_url?: string;
-      display_image_url?: string;
-    };
-
-    const urls = [
-      data.nft?.display_image_url,
-      data.nft?.image_url,
-      data.display_image_url,
-      data.image_url,
-    ].filter((u): u is string => !!u);
-
-    return await fetchFirstImage(urls);
+    const urls = await fetchOpenSeaMeta(contract, tokenId, apiKey);
+    const cdn = pickCdnUrl(urls);
+    if (cdn) return redirectImage(cdn, "opensea-redirect");
+    return await fetchFirstImage(urls.flatMap((u) => ipfsToUrls(u).concat(u)));
   } catch {
     return null;
   }
@@ -190,62 +227,49 @@ async function tryAlchemy(
   apiKey: string,
 ): Promise<Response | null> {
   const hasKey = apiKey !== "demo";
+  if (!hasKey) return null;
 
   try {
-    if (hasKey) {
-      await fetch(
-        `https://eth-mainnet.g.alchemy.com/nft/v3/${apiKey}/refreshNftMetadata`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ contractAddress: contract, tokenId }),
-        },
-      ).catch(() => null);
-      await sleep(1500);
-    }
+    const metaRes = await fetch(
+      `https://eth-mainnet.g.alchemy.com/nft/v3/${apiKey}/getNFTMetadata?contractAddress=${contract}&tokenId=${tokenId}&refreshCache=false&tokenUriTimeoutInMs=8000`,
+      { signal: AbortSignal.timeout(META_MS) },
+    );
+    if (!metaRes.ok) return null;
 
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const metaRes = await fetchWithTimeout(
-        `https://eth-mainnet.g.alchemy.com/nft/v3/${apiKey}/getNFTMetadata?contractAddress=${contract}&tokenId=${tokenId}&refreshCache=true&tokenUriTimeoutInMs=12000`,
-      );
-      if (!metaRes.ok) break;
-
-      const data = (await metaRes.json()) as {
-        image?: {
-          pngUrl?: string;
-          thumbnailUrl?: string;
-          cachedUrl?: string;
-          originalUrl?: string;
-        };
-        media?: { gateway?: string; raw?: string }[];
-        raw?: { metadata?: { image?: string } };
+    const data = (await metaRes.json()) as {
+      image?: {
+        pngUrl?: string;
+        thumbnailUrl?: string;
+        cachedUrl?: string;
+        originalUrl?: string;
       };
+      media?: { gateway?: string; raw?: string }[];
+      raw?: { metadata?: { image?: string } };
+    };
 
-      const candidates = [
-        data.image?.pngUrl,
-        data.image?.thumbnailUrl,
-        data.image?.cachedUrl,
-        data.image?.originalUrl,
-        data.media?.[0]?.gateway,
-        data.media?.[0]?.raw,
-        data.raw?.metadata?.image,
-      ].filter((u): u is string => !!u);
+    const candidates = [
+      data.image?.pngUrl,
+      data.image?.thumbnailUrl,
+      data.image?.cachedUrl,
+      data.image?.originalUrl,
+      data.media?.[0]?.gateway,
+      data.media?.[0]?.raw,
+      data.raw?.metadata?.image,
+    ].filter((u): u is string => !!u);
 
-      const expanded: string[] = [];
-      for (const c of candidates) {
-        if (c.startsWith("http")) expanded.push(c);
-        else expanded.push(...ipfsToUrls(c));
-      }
+    const cdn = pickCdnUrl(candidates);
+    if (cdn) return redirectImage(cdn, "alchemy-redirect");
 
-      const resp = await fetchFirstImage(expanded);
-      if (resp) return resp;
-
-      if (hasKey && attempt < 2) await sleep(2000);
+    const expanded: string[] = [];
+    for (const c of candidates) {
+      if (c.startsWith("http")) expanded.push(c);
+      else expanded.push(...ipfsToUrls(c));
     }
+
+    return await fetchFirstImage(expanded);
   } catch {
-    /* fall through */
+    return null;
   }
-  return null;
 }
 
 async function tryOnChainProxy(

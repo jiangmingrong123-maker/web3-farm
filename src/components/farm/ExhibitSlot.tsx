@@ -1,6 +1,6 @@
 "use client";
 
-import Image from "next/image";
+import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { SLOT_UNLOCK_COSTS } from "@/config/slots";
 
@@ -30,6 +30,11 @@ export function ExhibitSlot({
 }: ExhibitSlotProps) {
   const t = useTranslations("hall");
   const cost = SLOT_UNLOCK_COSTS[index] ?? 0;
+  const [imgFailed, setImgFailed] = useState(false);
+
+  useEffect(() => {
+    setImgFailed(false);
+  }, [imageUrl]);
 
   return (
     <div
@@ -100,14 +105,14 @@ export function ExhibitSlot({
         {status === "filled" && (
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1.5 sm:gap-2">
             <div className="relative h-16 w-16 overflow-hidden rounded-lg border border-gold/50 bg-black/40 sm:h-20 sm:w-20">
-              {imageUrl ? (
-                <Image
+              {imageUrl && !imgFailed ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
                   src={imageUrl}
                   alt={label ?? `NFT #${index}`}
-                  fill
-                  className="object-cover"
-                  sizes="80px"
-                  unoptimized
+                  className="h-full w-full object-cover"
+                  loading="lazy"
+                  onError={() => setImgFailed(true)}
                 />
               ) : (
                 <div className="flex h-full w-full items-center justify-center text-xl text-gold sm:text-2xl">

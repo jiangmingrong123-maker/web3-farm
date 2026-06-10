@@ -102,7 +102,7 @@ export async function syncFarmBindingsClient(
     if (!nft) continue;
     const slot = Number(key);
     const result = await verifyNftOwnership(nft.contract, nft.tokenId, wallet);
-    if (!result.ok) {
+    if (!result.ok && (result.error === "NOT_OWNER" || result.error === "NOT_FOUND")) {
       toClear.push(slot);
       names[slot] = nft.name;
       tokenIds[slot] = nft.tokenId;

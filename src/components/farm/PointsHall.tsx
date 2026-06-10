@@ -57,6 +57,9 @@ export function PointsHall({ locale }: { locale: string }) {
 
   const verifyAndSyncBindings = useCallback(
     async (wallet: string, current: FarmState): Promise<FarmState> => {
+      const hasBindings = Object.values(current.boundSlots).some(Boolean);
+      if (!hasBindings) return current;
+
       const api = await syncFarmBindingsApi(wallet);
       const result =
         api ?? (await syncFarmBindingsClient(wallet as `0x${string}`, current));

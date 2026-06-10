@@ -44,7 +44,14 @@ interface Env {
     get(key: string): Promise<string | null>;
     put(key: string, value: string): Promise<void>;
   };
+  ALCHEMY_API_KEY?: string;
 }
+
+type OwnerLookup =
+  | { kind: "owner"; address: string }
+  | { kind: "not_owner"; address: string }
+  | { kind: "not_found" }
+  | { kind: "rpc_error" };
 
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
@@ -208,9 +215,22 @@ function decodeAddress(hex: string): string | null {
   return `0x${clean.slice(-40)}`.toLowerCase();
 }
 
-async function ethOwnerOf(contract: string, tokenId: string): Promise<string | null> {
+function rpcUrls(env: Env): string[] {
+  const key = env.ALCHEMY_API_KEY?.trim();
+  const urls: string[] = [];
+  if (key) urls.push(`https://eth-mainnet.g.alchemy.com/v2/${key}`);
+  return [...urls, ...RPC_URLS];
+}
+
+async function ethOwnerOf(
+  env: Env,
+  contract: string,
+  tokenId: string,
+): Promise<OwnerLookup> {
   const data = encodeOwnerOf(tokenId);
-  for (const rpc of RPC_URLS) {
+  let rpcFailed = false;
+
+  for (const rpc of rpcUrls(env)) {
     try {
       const res = await fetch(rpc, {
         method: "POST",
@@ -223,39 +243,79 @@ async function ethOwnerOf(contract: string, tokenId: string): Promise<string | n
         }),
         signal: AbortSignal.timeout(20_000),
       });
-      if (!res.ok) continue;
-      const body = (await res.json()) as { result?: string; error?: unknown };
-      if (!body.result || body.result === "0x") return null;
-      return decodeAddress(body.result);
+      if (!res.ok) {
+        rpcFailed = true;
+        continue;
+      }
+      const body = (await res.json()) as {
+        result?: string;
+        error?: { message?: string };
+      };
+      if (body.error) {
+        const msg = (body.error.message ?? "").toLowerCase();
+        if (
+          msg.includes("revert") ||
+          msg.includes("erc721") ||
+          msg.includes("nonexistent")
+        ) {
+          return { kind: "not_found" };
+        }
+        rpcFailed = true;
+        continue;
+      }
+      if (!body.result || body.result === "0x") {
+        rpcFailed = true;
+        continue;
+      }
+      const owner = decodeAddress(body.result);
+      if (!owner) {
+        rpcFailed = true;
+        continue;
+      }
+      return { kind: "owner", address: owner };
     } catch {
-      /* next rpc */
+      rpcFailed = true;
     }
   }
-  return null;
+
+  return rpcFailed ? { kind: "rpc_error" } : { kind: "not_found" };
 }
 
 async function purgeStaleBindings(
+  env: Env,
   state: FarmState,
   wallet: string,
 ): Promise<{
   state: FarmState;
   removed: { slot: number; name: string; tokenId: string }[];
+  skipped: boolean;
 }> {
   const boundSlots = { ...state.boundSlots };
   const removed: { slot: number; name: string; tokenId: string }[] = [];
+  let skipped = false;
 
   for (const [key, nft] of Object.entries(boundSlots)) {
     if (!nft) continue;
     const slot = Number(key);
-    const owner = await ethOwnerOf(nft.contract.toLowerCase(), nft.tokenId);
-    if (!owner || owner !== wallet) {
+    const lookup = await ethOwnerOf(env, nft.contract.toLowerCase(), nft.tokenId);
+
+    if (lookup.kind === "rpc_error") {
+      skipped = true;
+      continue;
+    }
+    if (lookup.kind === "not_found") {
+      boundSlots[slot] = null;
+      removed.push({ slot, name: nft.name, tokenId: nft.tokenId });
+      continue;
+    }
+    if (lookup.kind === "owner" && lookup.address !== wallet) {
       boundSlots[slot] = null;
       removed.push({ slot, name: nft.name, tokenId: nft.tokenId });
     }
   }
 
   const next = syncAccrual({ ...state, boundSlots }, Date.now());
-  return { state: next, removed };
+  return { state: next, removed, skipped };
 }
 
 export const onRequest = async (context: {
@@ -284,9 +344,9 @@ export const onRequest = async (context: {
     const loaded = await loadFarm(env, wallet);
     const base = loaded.exists ? loaded.state : defaultState();
     const synced = syncAccrual(base, Date.now());
-    const { state, removed } = await purgeStaleBindings(synced, wallet);
-    const saved = await saveFarm(env, wallet, state);
-    return json({ ok: true, state: saved, removed });
+    const { state, removed, skipped } = await purgeStaleBindings(env, synced, wallet);
+    const saved = skipped && removed.length === 0 ? state : await saveFarm(env, wallet, state);
+    return json({ ok: true, state: saved, removed, skipped });
   }
 
   if (path[1] === "charge-swap" && request.method === "POST") {
