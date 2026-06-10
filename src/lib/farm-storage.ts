@@ -30,6 +30,8 @@ export interface FarmState {
   accrualAnchorAt: number | null;
   /** Last time pending was synced from the accrual clock. */
   lastAccrualTickAt: number | null;
+  /** Swaps that have passed fee gate (free or paid). */
+  swapCount: number;
 }
 
 const DEFAULT_STATE: FarmState = {
@@ -40,6 +42,7 @@ const DEFAULT_STATE: FarmState = {
   pendingPoints: 0,
   accrualAnchorAt: null,
   lastAccrualTickAt: null,
+  swapCount: 0,
 };
 
 function key(wallet: string) {
@@ -79,6 +82,7 @@ export function loadFarmState(wallet: string | undefined): FarmState {
       pendingPoints: parsed.pendingPoints ?? 0,
       accrualAnchorAt: parsed.accrualAnchorAt ?? null,
       lastAccrualTickAt: parsed.lastAccrualTickAt ?? null,
+      swapCount: parsed.swapCount ?? 0,
     };
     return syncAccrual(merged, Date.now());
   } catch {

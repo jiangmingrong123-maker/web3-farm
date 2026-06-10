@@ -10,6 +10,7 @@ import {
   SLOT_UNLOCK_COSTS,
 } from "@/config/slots";
 import { getCollectionByContract } from "@/config/collections";
+import { fetchFarmStateApi, saveFarmStateApi } from "@/lib/farm-api";
 import {
   accrualStopped,
   bindNftToSlot,
@@ -51,19 +52,39 @@ export function PointsHall({ locale }: { locale: string }) {
       setState(null);
       return;
     }
-    const loaded = loadFarmState(address);
-    if (loaded.accrualAnchorAt == null) {
-      const now = Date.now();
-      const started = {
-        ...loaded,
-        accrualAnchorAt: now,
-        lastAccrualTickAt: now,
-      };
-      setState(started);
-      saveFarmState(address, started);
-    } else {
-      setState(loaded);
-    }
+    let cancelled = false;
+
+    (async () => {
+      const local = loadFarmState(address);
+      const remote = await fetchFarmStateApi(address);
+      let merged = remote ?? local;
+      merged = syncAccrual(merged, Date.now());
+
+      if (merged.accrualAnchorAt == null) {
+        const now = Date.now();
+        merged = {
+          ...merged,
+          accrualAnchorAt: now,
+          lastAccrualTickAt: now,
+        };
+      }
+
+      if (cancelled) return;
+      setState(merged);
+      saveFarmState(address, merged);
+
+      if (!remote) {
+        const saved = await saveFarmStateApi(address, merged);
+        if (saved && !cancelled) {
+          setState(saved);
+          saveFarmState(address, saved);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [address]);
 
   useEffect(() => {
@@ -81,7 +102,14 @@ export function PointsHall({ locale }: { locale: string }) {
     (next: FarmState) => {
       const synced = syncAccrual(next, Date.now());
       setState(synced);
-      if (address) saveFarmState(address, synced);
+      if (!address) return;
+      saveFarmState(address, synced);
+      void saveFarmStateApi(address, synced).then((saved) => {
+        if (saved) {
+          setState(saved);
+          saveFarmState(address, saved);
+        }
+      });
     },
     [address],
   );
@@ -284,6 +312,7 @@ export function PointsHall({ locale }: { locale: string }) {
           <li>{t("rule2")}</li>
           <li>{t("rule3")}</li>
           <li>{t("rule4")}</li>
+          <li>{t("rule5")}</li>
         </ul>
       </section>
     </div>

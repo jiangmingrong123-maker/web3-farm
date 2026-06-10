@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import { useAccount } from "wagmi";
+import { SWAP_FREE_COUNT, SWAP_FEE_POINTS } from "@/config/swap-fees";
 import { SWAP_ESCROW_ENABLED, SWAP_SLOTS_PER_SIDE } from "@/config/swap";
+import { fetchFarmStateApi } from "@/lib/farm-api";
 import type { VerifiedNft } from "@/lib/nft/verify";
 import type { ApiRoom } from "@/lib/swap/api-types";
 import {
@@ -42,6 +44,8 @@ export function SwapBoard({ initialRoomId }: { initialRoomId?: string }) {
   const [creating, setCreating] = useState(false);
   const [tick, setTick] = useState(0);
   const [orderTick, setOrderTick] = useState(0);
+  const [swapFeeFreeLeft, setSwapFeeFreeLeft] = useState<number | null>(null);
+  const [farmPoints, setFarmPoints] = useState<number | null>(null);
 
   const creatorToken = roomId ? getCreatorTokenFromStorage(roomId) : null;
   const mySide = room ? resolveMySide(room, address, creatorToken, roomId) : null;
@@ -142,6 +146,19 @@ export function SwapBoard({ initialRoomId }: { initialRoomId?: string }) {
     room?.depositedBy,
     room?.status === "executed",
   );
+
+  useEffect(() => {
+    if (!address) {
+      setSwapFeeFreeLeft(null);
+      setFarmPoints(null);
+      return;
+    }
+    fetchFarmStateApi(address).then((s) => {
+      if (!s) return;
+      setFarmPoints(s.points);
+      setSwapFeeFreeLeft(Math.max(0, SWAP_FREE_COUNT - s.swapCount));
+    });
+  }, [address, room?.status, orderStatus.executed]);
 
   useEffect(() => {
     if (orderStatus.executed && room && room.status !== "executed" && roomId) {
@@ -380,7 +397,17 @@ export function SwapBoard({ initialRoomId }: { initialRoomId?: string }) {
           {(canDeposit || myDeposited) && !orderStatus.executed && (
             <div className="rounded-2xl border border-gold/40 bg-gold/10 p-5 text-center">
               <p className="mb-2 text-sm text-white/70">{t("depositHint")}</p>
-              <p className="mb-4 text-xs text-white/45">{t("depositAtomicNote")}</p>
+              <p className="mb-2 text-xs text-white/45">{t("depositAtomicNote")}</p>
+              {isConnected && swapFeeFreeLeft != null && (
+                <p className="mb-4 text-xs text-gold/80">
+                  {swapFeeFreeLeft > 0
+                    ? t("swapFeeFree", { left: swapFeeFreeLeft })
+                    : t("swapFeePaid", {
+                        fee: SWAP_FEE_POINTS,
+                        balance: farmPoints ?? 0,
+                      })}
+                </p>
+              )}
               <button
                 type="button"
                 disabled={chainPending || !canDeposit || myDeposited}
@@ -397,7 +424,9 @@ export function SwapBoard({ initialRoomId }: { initialRoomId?: string }) {
                 <p className="mt-2 text-xs text-red-400">
                   {chainError === "WAIT_MAKER"
                     ? t("waitMakerFirst")
-                    : t("executeFailed")}
+                    : chainError === "INSUFFICIENT_POINTS"
+                      ? t("insufficientPoints", { fee: SWAP_FEE_POINTS })
+                      : t("executeFailed")}
                 </p>
               )}
             </div>

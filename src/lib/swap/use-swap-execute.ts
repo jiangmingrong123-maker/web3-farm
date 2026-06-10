@@ -6,6 +6,7 @@ import { SWAP_ESCROW_ADDRESS, SWAP_ESCROW_ENABLED } from "@/config/swap";
 import type { ApiParty, ApiRoom } from "./api-types";
 import type { SwapOrderStatus } from "./use-swap-order-status";
 import { swapEscrowAbi, type NftItemInput } from "./escrow-abi";
+import { chargeSwapFeeApi } from "@/lib/farm-api";
 import {
   markDepositStartedApi,
   markSwapExecutedApi,
@@ -72,6 +73,12 @@ export function useSwapExecute(
     setPending(true);
     setError(null);
     try {
+      const fee = await chargeSwapFeeApi(address, room.id);
+      if (!fee.ok) {
+        setError(fee.error === "INSUFFICIENT_POINTS" ? "INSUFFICIENT_POINTS" : "TX_FAILED");
+        return;
+      }
+
       if (mySide === "B" && !room.chainOrderId) {
         setError("WAIT_MAKER");
         return;

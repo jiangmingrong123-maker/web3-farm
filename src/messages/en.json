@@ -97,7 +97,8 @@
     "rule1": "Points accrue while connected; claim once every 24 hours",
     "rule2": "Accrual stops after 72h without a claim; daily cap 1000 pts",
     "rule3": "2 slots free; only the next 2 unlock costs are shown, later slots stay hidden",
-    "rule4": "Each bound Nobody +100 pts/day (10 pts/day base without bindings)"
+    "rule4": "Each bound Nobody +100 pts/day (10 pts/day base without bindings)",
+    "rule5": "Points sync by wallet address in the cloud — same wallet on any device"
   },
   "swap": {
     "badge": "P2P · ON-CHAIN VERIFY",
@@ -124,6 +125,9 @@
     "claimingSide": "Joining room…",
     "executeHint": "Both sides confirmed — approve escrow and execute atomic swap on-chain",
     "executeSwap": "Execute swap",
+    "swapFeeFree": "Swap fee: {left} free swaps remaining",
+    "swapFeePaid": "Swap fee: {fee} pts per swap (balance {balance})",
+    "insufficientPoints": "Not enough points — deposit costs {fee} pts. Claim in the hall first.",
     "depositHint": "Both confirmed — transfer your slotted NFTs into the escrow contract",
     "depositAtomicNote": "No collection-wide approval. When both sides deposit, the contract swaps atomically in one transaction.",
     "depositNfts": "Deposit NFTs",
