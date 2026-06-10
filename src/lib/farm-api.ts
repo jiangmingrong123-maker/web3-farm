@@ -17,8 +17,13 @@ export async function fetchFarmStateApi(
       headers: { "Cache-Control": "no-cache" },
     });
     if (!res.ok) return null;
-    const data = (await res.json()) as { ok?: boolean; state?: FarmState };
-    return data.ok && data.state ? data.state : null;
+    const data = (await res.json()) as {
+      ok?: boolean;
+      exists?: boolean;
+      state?: FarmState | null;
+    };
+    if (!data.ok || !data.exists || !data.state) return null;
+    return data.state;
   } catch {
     return isLocalDev() ? null : null;
   }

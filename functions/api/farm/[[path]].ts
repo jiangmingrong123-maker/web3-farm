@@ -129,14 +129,24 @@ function sanitizeState(raw: Partial<FarmState>): FarmState {
   return syncAccrual(merged, Date.now());
 }
 
-async function loadFarm(env: Env, wallet: string): Promise<FarmState> {
+async function loadFarm(
+  env: Env,
+  wallet: string,
+): Promise<{ exists: boolean; state: FarmState }> {
   const key = `farm:${wallet}`;
   if (env.SWAP_KV) {
     const raw = await env.SWAP_KV.get(key);
-    if (raw) return sanitizeState(JSON.parse(raw) as Partial<FarmState>);
-    return defaultState();
+    if (raw) {
+      return {
+        exists: true,
+        state: sanitizeState(JSON.parse(raw) as Partial<FarmState>),
+      };
+    }
+    return { exists: false, state: defaultState() };
   }
-  return memory.get(wallet) ?? defaultState();
+  const mem = memory.get(wallet);
+  if (mem) return { exists: true, state: mem };
+  return { exists: false, state: defaultState() };
 }
 
 async function saveFarm(env: Env, wallet: string, state: FarmState) {
@@ -188,8 +198,8 @@ export const onRequest = async (context: {
   if (!wallet) return new Response("Bad wallet", { status: 400 });
 
   if (path.length === 1 && request.method === "GET") {
-    const state = await loadFarm(env, wallet);
-    return json({ ok: true, state });
+    const { exists, state } = await loadFarm(env, wallet);
+    return json({ ok: true, exists, state: exists ? state : null });
   }
 
   if (path.length === 1 && request.method === "PUT") {
@@ -205,7 +215,7 @@ export const onRequest = async (context: {
     if (!roomId) return new Response("Missing roomId", { status: 400 });
 
     if (await feeCharged(env, wallet, roomId)) {
-      const state = await loadFarm(env, wallet);
+      const { state } = await loadFarm(env, wallet);
       return json({
         ok: true,
         alreadyCharged: true,
@@ -217,7 +227,7 @@ export const onRequest = async (context: {
       });
     }
 
-    let state = syncAccrual(await loadFarm(env, wallet), Date.now());
+    let state = syncAccrual((await loadFarm(env, wallet)).state, Date.now());
     let charged = 0;
     const free = state.swapCount < SWAP_FREE_COUNT;
 

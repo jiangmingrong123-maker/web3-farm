@@ -98,7 +98,8 @@
     "rule2": "Accrual stops after 72h without a claim; daily cap 1000 pts",
     "rule3": "2 slots free; only the next 2 unlock costs are shown, later slots stay hidden",
     "rule4": "Each bound Nobody +100 pts/day (10 pts/day base without bindings)",
-    "rule5": "Points sync by wallet address in the cloud — same wallet on any device"
+    "rule5": "Points sync by wallet address in the cloud — same wallet on any device",
+    "syncFailed": "Cloud sync failed — check network and try again (points may not be saved)"
   },
   "swap": {
     "badge": "P2P · ON-CHAIN VERIFY",

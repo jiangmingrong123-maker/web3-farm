@@ -208,3 +208,29 @@ export function unbindNftFromSlot(state: FarmState, slotIndex: number): FarmStat
   const boundSlots = { ...state.boundSlots, [slotIndex]: null };
   return { ...state, boundSlots };
 }
+
+function laterClaimAt(a: number | null, b: number | null): number | null {
+  if (a == null) return b;
+  if (b == null) return a;
+  return Math.max(a, b);
+}
+
+/** Merge local + remote when both may have changes (e.g. offline claim). */
+export function mergeFarmStates(local: FarmState, remote: FarmState): FarmState {
+  const boundSlots = { ...remote.boundSlots, ...local.boundSlots };
+  return syncAccrual(
+    {
+      ...remote,
+      ...local,
+      points: Math.max(local.points, remote.points),
+      pendingPoints: Math.max(local.pendingPoints, remote.pendingPoints),
+      unlockedSlots: Math.max(local.unlockedSlots, remote.unlockedSlots),
+      swapCount: Math.max(local.swapCount, remote.swapCount),
+      lastClaimAt: laterClaimAt(local.lastClaimAt, remote.lastClaimAt),
+      accrualAnchorAt: laterClaimAt(local.accrualAnchorAt, remote.accrualAnchorAt),
+      lastAccrualTickAt: laterClaimAt(local.lastAccrualTickAt, remote.lastAccrualTickAt),
+      boundSlots,
+    },
+    Date.now(),
+  );
+}

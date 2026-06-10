@@ -18,6 +18,7 @@ import {
   claimCooldownLeftMs,
   dailyAccrualRate,
   loadFarmState,
+  mergeFarmStates,
   maxPendingPoints,
   performClaim,
   saveFarmState,
@@ -45,6 +46,7 @@ export function PointsHall({ locale }: { locale: string }) {
   const [state, setState] = useState<FarmState | null>(null);
   const [bindingSlot, setBindingSlot] = useState<number | null>(null);
   const [bindError, setBindError] = useState<string | null>(null);
+  const [syncError, setSyncError] = useState(false);
   const [, setTick] = useState(0);
 
   useEffect(() => {
@@ -55,10 +57,10 @@ export function PointsHall({ locale }: { locale: string }) {
     let cancelled = false;
 
     (async () => {
-      const local = loadFarmState(address);
+      setSyncError(false);
+      const local = syncAccrual(loadFarmState(address), Date.now());
       const remote = await fetchFarmStateApi(address);
-      let merged = remote ?? local;
-      merged = syncAccrual(merged, Date.now());
+      let merged = remote ? mergeFarmStates(local, remote) : local;
 
       if (merged.accrualAnchorAt == null) {
         const now = Date.now();
@@ -73,12 +75,13 @@ export function PointsHall({ locale }: { locale: string }) {
       setState(merged);
       saveFarmState(address, merged);
 
-      if (!remote) {
-        const saved = await saveFarmStateApi(address, merged);
-        if (saved && !cancelled) {
-          setState(saved);
-          saveFarmState(address, saved);
-        }
+      const saved = await saveFarmStateApi(address, merged);
+      if (cancelled) return;
+      if (saved) {
+        setState(saved);
+        saveFarmState(address, saved);
+      } else {
+        setSyncError(true);
       }
     })();
 
@@ -99,32 +102,35 @@ export function PointsHall({ locale }: { locale: string }) {
   }, []);
 
   const persist = useCallback(
-    (next: FarmState) => {
+    async (next: FarmState) => {
       const synced = syncAccrual(next, Date.now());
       setState(synced);
-      if (!address) return;
+      if (!address) return synced;
       saveFarmState(address, synced);
-      void saveFarmStateApi(address, synced).then((saved) => {
-        if (saved) {
-          setState(saved);
-          saveFarmState(address, saved);
-        }
-      });
+      setSyncError(false);
+      const saved = await saveFarmStateApi(address, synced);
+      if (saved) {
+        setState(saved);
+        saveFarmState(address, saved);
+        return saved;
+      }
+      setSyncError(true);
+      return synced;
     },
     [address],
   );
 
-  const handleClaim = () => {
+  const handleClaim = async () => {
     if (!isConnected || !address || !state) return;
     const next = performClaim(state);
-    if (next) persist(next);
+    if (next) await persist(next);
   };
 
-  const handleUnlock = (slotIndex: number) => {
+  const handleUnlock = async (slotIndex: number) => {
     if (!state) return;
     const cost = SLOT_UNLOCK_COSTS[slotIndex] ?? 0;
     const next = unlockSlot(state, slotIndex, cost);
-    if (next) persist(next);
+    if (next) await persist(next);
   };
 
   const handleBindNft = (nft: VerifiedNft) => {
@@ -152,7 +158,7 @@ export function PointsHall({ locale }: { locale: string }) {
       return;
     }
 
-    persist(next);
+    await persist(next);
     setBindingSlot(null);
   };
 
@@ -212,10 +218,16 @@ export function PointsHall({ locale }: { locale: string }) {
               )}
             </div>
 
+            {syncError && (
+              <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-center text-[11px] text-red-300">
+                {t("syncFailed")}
+              </p>
+            )}
+
             <button
               type="button"
               disabled={!claimable}
-              onClick={handleClaim}
+              onClick={() => void handleClaim()}
               className="rounded-full bg-gold px-5 py-3 text-sm font-bold text-ink transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
             >
               {!isConnected
