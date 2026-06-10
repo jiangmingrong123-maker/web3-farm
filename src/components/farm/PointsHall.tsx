@@ -133,7 +133,7 @@ export function PointsHall({ locale }: { locale: string }) {
     if (next) await persist(next);
   };
 
-  const handleBindNft = (nft: VerifiedNft) => {
+  const handleBindNft = async (nft: VerifiedNft) => {
     if (!state || bindingSlot == null) return;
     setBindError(null);
 
