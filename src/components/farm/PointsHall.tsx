@@ -3,20 +3,28 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { useAccount } from "wagmi";
+import { AddNftPanel } from "@/components/swap/AddNftPanel";
 import {
+  DAILY_POINTS_CAP,
   HALL_SLOT_COUNT,
-  SEASON0_DAILY_BASE,
   SLOT_UNLOCK_COSTS,
 } from "@/config/slots";
+import { getCollectionByContract } from "@/config/collections";
 import {
+  accrualStopped,
+  bindNftToSlot,
   canClaim,
   claimCooldownLeftMs,
+  dailyAccrualRate,
   loadFarmState,
+  maxPendingPoints,
   performClaim,
   saveFarmState,
+  syncAccrual,
   unlockSlot,
   type FarmState,
 } from "@/lib/farm-storage";
+import type { VerifiedNft } from "@/lib/nft/verify";
 import { ExhibitSlot, type SlotStatus } from "./ExhibitSlot";
 
 function formatCountdown(ms: number, locale: string) {
@@ -26,25 +34,54 @@ function formatCountdown(ms: number, locale: string) {
   return `${h}h ${m}m`;
 }
 
+function formatPts(n: number) {
+  return Math.floor(n * 10) / 10;
+}
+
 export function PointsHall({ locale }: { locale: string }) {
   const t = useTranslations("hall");
   const { address, isConnected } = useAccount();
   const [state, setState] = useState<FarmState | null>(null);
-  const [tick, setTick] = useState(0);
+  const [bindingSlot, setBindingSlot] = useState<number | null>(null);
+  const [bindError, setBindError] = useState<string | null>(null);
+  const [, setTick] = useState(0);
 
   useEffect(() => {
-    setState(loadFarmState(address));
+    if (!address) {
+      setState(null);
+      return;
+    }
+    const loaded = loadFarmState(address);
+    if (loaded.accrualAnchorAt == null) {
+      const now = Date.now();
+      const started = {
+        ...loaded,
+        accrualAnchorAt: now,
+        lastAccrualTickAt: now,
+      };
+      setState(started);
+      saveFarmState(address, started);
+    } else {
+      setState(loaded);
+    }
   }, [address]);
 
   useEffect(() => {
-    const id = setInterval(() => setTick((n) => n + 1), 60000);
+    const id = setInterval(() => {
+      setState((prev) => {
+        if (!prev) return prev;
+        return syncAccrual(prev, Date.now());
+      });
+      setTick((n) => n + 1);
+    }, 30000);
     return () => clearInterval(id);
   }, []);
 
   const persist = useCallback(
     (next: FarmState) => {
-      setState(next);
-      if (address) saveFarmState(address, next);
+      const synced = syncAccrual(next, Date.now());
+      setState(synced);
+      if (address) saveFarmState(address, synced);
     },
     [address],
   );
@@ -62,13 +99,46 @@ export function PointsHall({ locale }: { locale: string }) {
     if (next) persist(next);
   };
 
+  const handleBindNft = (nft: VerifiedNft) => {
+    if (!state || bindingSlot == null) return;
+    setBindError(null);
+
+    const collection = getCollectionByContract(nft.contract);
+    const maxBindings = collection?.maxBindingsPerWallet ?? 5;
+    const currentBindings = Object.values(state.boundSlots).filter(Boolean).length;
+    if (currentBindings >= maxBindings) {
+      setBindError(t("errMaxBindings", { max: maxBindings }));
+      return;
+    }
+
+    const next = bindNftToSlot(state, bindingSlot, {
+      contract: nft.contract,
+      tokenId: nft.tokenId.toString(),
+      name: `${nft.collectionName} #${nft.tokenId}`,
+      imageUrl: nft.imageUrl ?? "",
+      collectionSlug: nft.collectionSlug,
+    });
+
+    if (!next) {
+      setBindError(t("errAlreadyBound"));
+      return;
+    }
+
+    persist(next);
+    setBindingSlot(null);
+  };
+
   const ready = isConnected && state;
-  const claimable = ready && canClaim(state);
-  const cooldownMs = state ? claimCooldownLeftMs(state) : 0;
-  void tick;
+  const synced = state ? syncAccrual(state, Date.now()) : null;
+  const claimable = ready && synced && canClaim(synced);
+  const cooldownMs = synced ? claimCooldownLeftMs(synced) : 0;
+  const dailyRate = synced ? dailyAccrualRate(synced) : 0;
+  const pending = synced ? formatPts(synced.pendingPoints) : 0;
+  const pendingCap = synced ? formatPts(maxPendingPoints(synced)) : 0;
+  const stopped = synced ? accrualStopped(synced) : false;
 
   function slotStatus(index: number): SlotStatus {
-    if (!state) return index === 1 ? "empty" : "locked";
+    if (!state) return index <= 2 ? "empty" : "locked";
     if (index > state.unlockedSlots) return "locked";
     if (state.boundSlots[index]) return "filled";
     return "empty";
@@ -76,7 +146,6 @@ export function PointsHall({ locale }: { locale: string }) {
 
   return (
     <div className="space-y-8">
-      {/* hall header — 借鉴鲸探展馆：积分 + 领取 */}
       <section className="relative overflow-hidden rounded-2xl border border-gold/20 bg-gradient-to-br from-surface via-ink to-black p-6 sm:p-8">
         <div className="pointer-events-none absolute -right-20 -top-20 h-56 w-56 rounded-full bg-gold/10 blur-3xl" />
         <div className="pointer-events-none absolute -bottom-16 -left-16 h-40 w-40 rounded-full bg-purple-500/10 blur-3xl" />
@@ -88,13 +157,31 @@ export function PointsHall({ locale }: { locale: string }) {
             <p className="mt-2 max-w-md text-sm text-white/50">{t("subtitle")}</p>
           </div>
 
-          <div className="flex flex-col items-stretch gap-3 sm:min-w-[220px]">
+          <div className="flex flex-col items-stretch gap-3 sm:min-w-[240px]">
             <div className="rounded-xl border border-white/10 bg-black/40 px-5 py-4 text-center">
               <p className="text-xs text-white/40">{t("balance")}</p>
               <p className="font-mono text-3xl font-bold text-gold">
-                {ready ? state.points : "—"}
+                {ready ? formatPts(state.points) : "—"}
               </p>
               <p className="mt-1 text-[10px] text-white/30">{t("balanceHint")}</p>
+            </div>
+
+            <div className="rounded-xl border border-gold/20 bg-gold/5 px-4 py-3 text-center">
+              <p className="text-[10px] text-white/40">{t("pending")}</p>
+              <p className="font-mono text-xl font-semibold text-gold/90">
+                {ready ? pending : "—"}
+                {ready && (
+                  <span className="text-sm text-white/35"> / {pendingCap}</span>
+                )}
+              </p>
+              <p className="mt-1 text-[10px] text-white/35">
+                {ready
+                  ? t("dailyRate", { rate: dailyRate, cap: DAILY_POINTS_CAP })
+                  : t("connectToClaim")}
+              </p>
+              {ready && stopped && (
+                <p className="mt-1 text-[10px] text-amber-400/90">{t("accrualStopped")}</p>
+              )}
             </div>
 
             <button
@@ -106,14 +193,15 @@ export function PointsHall({ locale }: { locale: string }) {
               {!isConnected
                 ? t("connectToClaim")
                 : claimable
-                  ? `${t("claim")} +${SEASON0_DAILY_BASE}`
-                  : `${t("claimWait")} ${formatCountdown(cooldownMs, locale)}`}
+                  ? t("claimPending", { amount: pending })
+                  : pending < 0.01
+                    ? t("claimAccruing")
+                    : `${t("claimWait")} ${formatCountdown(cooldownMs, locale)}`}
             </button>
           </div>
         </div>
       </section>
 
-      {/* 12-slot exhibition grid */}
       <section>
         <div className="mb-4 flex items-end justify-between gap-4">
           <div>
@@ -121,7 +209,7 @@ export function PointsHall({ locale }: { locale: string }) {
             <p className="text-sm text-white/45">{t("gridHint")}</p>
           </div>
           <p className="shrink-0 font-mono text-xs text-white/35">
-            {ready ? `${state.unlockedSlots}/${HALL_SLOT_COUNT}` : `0/${HALL_SLOT_COUNT}`}{" "}
+            {ready ? `${state.unlockedSlots}/${HALL_SLOT_COUNT}` : `2/${HALL_SLOT_COUNT}`}{" "}
             {t("unlocked")}
           </p>
         </div>
@@ -132,8 +220,13 @@ export function PointsHall({ locale }: { locale: string }) {
               const index = i + 1;
               const status = slotStatus(index);
               const bound = state?.boundSlots[index];
-              const nextLocked = state ? index === state.unlockedSlots + 1 : index === 2;
+              const unlockedCount = state?.unlockedSlots ?? 2;
+              const nextLocked = state ? index === unlockedCount + 1 : index === 3;
               const cost = SLOT_UNLOCK_COSTS[index] ?? 0;
+              const showUnlockCost =
+                status === "locked" &&
+                index > unlockedCount &&
+                index <= unlockedCount + 2;
               const canUnlock =
                 !!state &&
                 nextLocked &&
@@ -146,9 +239,18 @@ export function PointsHall({ locale }: { locale: string }) {
                   index={index}
                   status={status}
                   label={bound?.name}
-                  tier={bound?.tier}
+                  imageUrl={bound?.imageUrl}
+                  showUnlockCost={showUnlockCost}
                   canUnlock={canUnlock}
                   onUnlock={() => handleUnlock(index)}
+                  onBind={
+                    isConnected && status === "empty"
+                      ? () => {
+                          setBindError(null);
+                          setBindingSlot(index);
+                        }
+                      : undefined
+                  }
                 />
               );
             })}
@@ -156,13 +258,32 @@ export function PointsHall({ locale }: { locale: string }) {
         </div>
       </section>
 
-      {/* season rules */}
+      {bindingSlot != null && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-4 sm:items-center">
+          <div className="w-full max-w-md">
+            {bindError && (
+              <p className="mb-2 rounded-lg bg-red-500/20 px-3 py-2 text-center text-xs text-red-300">
+                {bindError}
+              </p>
+            )}
+            <AddNftPanel
+              onAdded={handleBindNft}
+              onCancel={() => {
+                setBindingSlot(null);
+                setBindError(null);
+              }}
+            />
+          </div>
+        </div>
+      )}
+
       <section className="rounded-2xl border border-white/8 bg-black/30 p-5 text-sm text-white/45">
         <h3 className="mb-2 font-semibold text-white/70">{t("rulesTitle")}</h3>
         <ul className="list-inside list-disc space-y-1">
           <li>{t("rule1")}</li>
           <li>{t("rule2")}</li>
           <li>{t("rule3")}</li>
+          <li>{t("rule4")}</li>
         </ul>
       </section>
     </div>

@@ -40,15 +40,13 @@ export default async function LocaleLayout({
   const messages = await getMessages();
 
   return (
-    <html lang={locale}>
-      <body className="min-h-screen bg-ink text-white antialiased">
-        <NextIntlClientProvider messages={messages}>
-          <Web3Provider>
-            <Header />
-            <main className="mx-auto max-w-5xl px-4 py-8">{children}</main>
-          </Web3Provider>
-        </NextIntlClientProvider>
-      </body>
-    </html>
+    <div lang={locale}>
+      <NextIntlClientProvider messages={messages}>
+        <Web3Provider>
+          <Header />
+          <main className="mx-auto max-w-5xl px-4 py-8">{children}</main>
+        </Web3Provider>
+      </NextIntlClientProvider>
+    </div>
   );
 }
