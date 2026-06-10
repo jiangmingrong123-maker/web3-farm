@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { useAccount, useWriteContract, usePublicClient } from "wagmi";
+import { useAccount, useSignMessage, useWriteContract, usePublicClient } from "wagmi";
 import { SWAP_ESCROW_ADDRESS, SWAP_ESCROW_ENABLED } from "@/config/swap";
 import type { ApiParty, ApiRoom } from "./api-types";
 import type { SwapOrderStatus } from "./use-swap-order-status";
@@ -36,6 +36,7 @@ export function useSwapExecute(
   onChainUpdate?: () => void,
 ) {
   const { address } = useAccount();
+  const { signMessageAsync } = useSignMessage();
   const { writeContractAsync } = useWriteContract();
   const publicClient = usePublicClient();
   const [pending, setPending] = useState(false);
@@ -73,7 +74,13 @@ export function useSwapExecute(
     setPending(true);
     setError(null);
     try {
-      const fee = await chargeSwapFeeApi(address, room.id);
+      if (!signMessageAsync) {
+        setError("TX_FAILED");
+        return;
+      }
+      const fee = await chargeSwapFeeApi(address, room.id, (message) =>
+        signMessageAsync({ message }),
+      );
       if (!fee.ok) {
         setError(fee.error === "INSUFFICIENT_POINTS" ? "INSUFFICIENT_POINTS" : "TX_FAILED");
         return;
@@ -126,6 +133,7 @@ export function useSwapExecute(
     room,
     mySide,
     address,
+    signMessageAsync,
     publicClient,
     writeContractAsync,
     getOrderId,

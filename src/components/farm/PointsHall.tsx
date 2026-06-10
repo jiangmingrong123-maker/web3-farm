@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
-import { useAccount } from "wagmi";
+import { useAccount, useSignMessage } from "wagmi";
 import { AddNftPanel } from "@/components/swap/AddNftPanel";
 import {
   DAILY_POINTS_CAP,
@@ -11,24 +11,25 @@ import {
 } from "@/config/slots";
 import { getCollectionByContract } from "@/config/collections";
 import {
+  bindNftApi,
+  claimFarmApi,
   fetchFarmStateApi,
-  saveFarmStateApi,
+  initFarmApi,
   syncFarmBindingsApi,
   syncFarmBindingsClient,
+  unlockSlotApi,
+  type FarmSignFn,
 } from "@/lib/farm-api";
 import {
   accrualStopped,
-  bindNftToSlot,
   canClaim,
   claimCooldownLeftMs,
   dailyAccrualRate,
   loadFarmState,
   mergeFarmStates,
   maxPendingPoints,
-  performClaim,
   saveFarmState,
   syncAccrual,
-  unlockSlot,
   type FarmState,
 } from "@/lib/farm-storage";
 import type { VerifiedNft } from "@/lib/nft/verify";
@@ -48,19 +49,35 @@ function formatPts(n: number) {
 export function PointsHall({ locale }: { locale: string }) {
   const t = useTranslations("hall");
   const { address, isConnected } = useAccount();
+  const { signMessageAsync } = useSignMessage();
   const [state, setState] = useState<FarmState | null>(null);
   const [bindingSlot, setBindingSlot] = useState<number | null>(null);
   const [bindError, setBindError] = useState<string | null>(null);
-  const [syncError, setSyncError] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [bindingsRemoved, setBindingsRemoved] = useState<string[]>([]);
   const [, setTick] = useState(0);
+
+  const sign: FarmSignFn = useCallback(
+    async (message) => {
+      if (!signMessageAsync) throw new Error("no signer");
+      return signMessageAsync({ message });
+    },
+    [signMessageAsync],
+  );
+
+  const applyState = useCallback((wallet: string, next: FarmState) => {
+    const synced = syncAccrual(next, Date.now());
+    setState(synced);
+    saveFarmState(wallet, synced);
+    return synced;
+  }, []);
 
   const verifyAndSyncBindings = useCallback(
     async (wallet: string, current: FarmState): Promise<FarmState> => {
       const hasBindings = Object.values(current.boundSlots).some(Boolean);
       if (!hasBindings) return current;
 
-      const api = await syncFarmBindingsApi(wallet);
+      const api = await syncFarmBindingsApi(wallet, sign);
       const result =
         api ?? (await syncFarmBindingsClient(wallet as `0x${string}`, current));
       if (result.removed.length > 0) {
@@ -68,7 +85,7 @@ export function PointsHall({ locale }: { locale: string }) {
       }
       return result.state;
     },
-    [],
+    [sign],
   );
 
   useEffect(() => {
@@ -79,39 +96,23 @@ export function PointsHall({ locale }: { locale: string }) {
     let cancelled = false;
 
     (async () => {
-      setSyncError(false);
-      const local = syncAccrual(loadFarmState(address), Date.now());
-      const remote = await fetchFarmStateApi(address);
-      let merged = remote ? mergeFarmStates(local, remote) : local;
-
-      if (merged.accrualAnchorAt == null) {
-        const now = Date.now();
-        merged = {
-          ...merged,
-          accrualAnchorAt: now,
-          lastAccrualTickAt: now,
-        };
+      setActionError(null);
+      let remote = await fetchFarmStateApi(address);
+      if (!remote) {
+        remote = await initFarmApi(address, sign);
       }
+      const local = syncAccrual(loadFarmState(address), Date.now());
+      let merged = remote ? mergeFarmStates(local, remote) : local;
 
       merged = await verifyAndSyncBindings(address, merged);
       if (cancelled) return;
-      setState(merged);
-      saveFarmState(address, merged);
-
-      const saved = await saveFarmStateApi(address, merged);
-      if (cancelled) return;
-      if (saved) {
-        setState(saved);
-        saveFarmState(address, saved);
-      } else {
-        setSyncError(true);
-      }
+      applyState(address, merged);
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [address, verifyAndSyncBindings]);
+  }, [address, sign, applyState, verifyAndSyncBindings]);
 
   useEffect(() => {
     const id = setInterval(() => {
@@ -124,43 +125,35 @@ export function PointsHall({ locale }: { locale: string }) {
     return () => clearInterval(id);
   }, []);
 
-  const persist = useCallback(
-    async (next: FarmState) => {
-      const synced = syncAccrual(next, Date.now());
-      setState(synced);
-      if (!address) return synced;
-      saveFarmState(address, synced);
-      setSyncError(false);
-      const saved = await saveFarmStateApi(address, synced);
-      if (saved) {
-        setState(saved);
-        saveFarmState(address, saved);
-        return saved;
-      }
-      setSyncError(true);
-      return synced;
-    },
-    [address],
-  );
-
   const handleClaim = async () => {
     if (!isConnected || !address || !state) return;
-    const synced = await verifyAndSyncBindings(address, state);
-    const base = await persist(synced);
-    const next = performClaim(base);
-    if (next) await persist(next);
+    setActionError(null);
+    const result = await claimFarmApi(address, sign);
+    if (!result) {
+      setActionError(t("actionFailed"));
+      return;
+    }
+    if (result.removed.length > 0) {
+      setBindingsRemoved(result.removed.map((r) => r.name));
+    }
+    applyState(address, result.state);
   };
 
   const handleUnlock = async (slotIndex: number) => {
-    if (!state) return;
-    const cost = SLOT_UNLOCK_COSTS[slotIndex] ?? 0;
-    const next = unlockSlot(state, slotIndex, cost);
-    if (next) await persist(next);
+    if (!address || !state) return;
+    setActionError(null);
+    const saved = await unlockSlotApi(address, slotIndex, sign);
+    if (!saved) {
+      setActionError(t("actionFailed"));
+      return;
+    }
+    applyState(address, saved);
   };
 
   const handleBindNft = async (nft: VerifiedNft) => {
-    if (!state || bindingSlot == null) return;
+    if (!address || !state || bindingSlot == null) return;
     setBindError(null);
+    setActionError(null);
 
     const collection = getCollectionByContract(nft.contract);
     const maxBindings = collection?.maxBindingsPerWallet ?? 5;
@@ -170,7 +163,8 @@ export function PointsHall({ locale }: { locale: string }) {
       return;
     }
 
-    const next = bindNftToSlot(state, bindingSlot, {
+    const saved = await bindNftApi(address, sign, {
+      slot: bindingSlot,
       contract: nft.contract,
       tokenId: nft.tokenId.toString(),
       name: `${nft.collectionName} #${nft.tokenId}`,
@@ -178,12 +172,12 @@ export function PointsHall({ locale }: { locale: string }) {
       collectionSlug: nft.collectionSlug,
     });
 
-    if (!next) {
+    if (!saved) {
       setBindError(t("errAlreadyBound"));
       return;
     }
 
-    await persist(next);
+    applyState(address, saved);
     setBindingSlot(null);
   };
 
@@ -249,9 +243,9 @@ export function PointsHall({ locale }: { locale: string }) {
               </p>
             )}
 
-            {syncError && (
+            {actionError && (
               <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-center text-[11px] text-red-300">
-                {t("syncFailed")}
+                {actionError}
               </p>
             )}
 
@@ -313,7 +307,7 @@ export function PointsHall({ locale }: { locale: string }) {
                   imageUrl={bound?.imageUrl}
                   showUnlockCost={showUnlockCost}
                   canUnlock={canUnlock}
-                  onUnlock={() => handleUnlock(index)}
+                  onUnlock={() => void handleUnlock(index)}
                   onBind={
                     isConnected && status === "empty"
                       ? () => {

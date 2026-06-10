@@ -8,7 +8,8 @@
     "pages:build": "npx @cloudflare/next-on-pages",
     "start": "next start",
     "lint": "next lint",
-    "deploy:swap": "node scripts/deploy-swap.mjs"
+    "deploy:swap": "node scripts/deploy-swap.mjs",
+    "grant:points": "node scripts/grant-points.mjs"
   },
   "engines": {
     "node": ">=20"
