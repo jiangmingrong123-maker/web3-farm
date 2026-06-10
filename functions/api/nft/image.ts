@@ -1,11 +1,11 @@
 /**
  * GET /api/nft/image?contract=0x...&tokenId=8122
- * Proxies NFT image bytes (market CDN → Alchemy → metadata/IPFS → SVG fallback).
+ * Proxies NFT image bytes (OpenSea CDN → Alchemy → metadata/IPFS → SVG fallback).
  */
 
 interface Env {
   ALCHEMY_API_KEY?: string;
-  RESERVOIR_API_KEY?: string;
+  OPENSEA_API_KEY?: string;
 }
 
 const NOBODY = {
@@ -148,36 +148,34 @@ async function nobodyImageUri(tokenId: string): Promise<string> {
   return `ipfs://${NOBODY.imageCid}/${tokenId}.png`;
 }
 
-async function tryReservoir(
+async function tryOpenSea(
   contract: string,
   tokenId: string,
-  apiKey?: string,
+  apiKey: string,
 ): Promise<Response | null> {
   try {
-    const headers: Record<string, string> = { Accept: "application/json" };
-    if (apiKey) headers["x-api-key"] = apiKey;
-
     const res = await fetchWithTimeout(
-      `https://api.reservoir.tools/tokens/v7?tokens=${contract}:${tokenId}`,
-      { headers },
+      `https://api.opensea.io/api/v2/chain/ethereum/contract/${contract}/nfts/${tokenId}`,
+      {
+        headers: {
+          Accept: "application/json",
+          "x-api-key": apiKey,
+        },
+      },
     );
     if (!res.ok) return null;
 
     const data = (await res.json()) as {
-      tokens?: {
-        token?: { image?: string; imageSmall?: string; imageLarge?: string };
-        media?: { image?: string; imageSmall?: string; imageLarge?: string };
-      }[];
+      nft?: { image_url?: string; display_image_url?: string };
+      image_url?: string;
+      display_image_url?: string;
     };
 
-    const token = data.tokens?.[0];
     const urls = [
-      token?.token?.imageLarge,
-      token?.token?.image,
-      token?.token?.imageSmall,
-      token?.media?.imageLarge,
-      token?.media?.image,
-      token?.media?.imageSmall,
+      data.nft?.display_image_url,
+      data.nft?.image_url,
+      data.display_image_url,
+      data.image_url,
     ].filter((u): u is string => !!u);
 
     return await fetchFirstImage(urls);
@@ -311,13 +309,15 @@ export async function onRequestGet(context: { request: Request; env: Env }) {
   }
 
   const alchemyKey = context.env.ALCHEMY_API_KEY?.trim() || "demo";
-  const reservoirKey = context.env.RESERVOIR_API_KEY?.trim();
+  const openseaKey = context.env.OPENSEA_API_KEY?.trim();
   const hasAlchemy = alchemyKey !== "demo";
 
-  const reservoirResp = await tryReservoir(contract, tokenId, reservoirKey);
-  if (reservoirResp) {
-    reservoirResp.headers.set("X-Image-Source", "reservoir");
-    return reservoirResp;
+  if (openseaKey) {
+    const openSeaResp = await tryOpenSea(contract, tokenId, openseaKey);
+    if (openSeaResp) {
+      openSeaResp.headers.set("X-Image-Source", "opensea");
+      return openSeaResp;
+    }
   }
 
   const alchemyResp = await tryAlchemy(contract, tokenId, alchemyKey);
@@ -344,16 +344,18 @@ export async function onRequestGet(context: { request: Request; env: Env }) {
     return svgFallback(tokenId, meta);
   }
 
-  const msg = hasAlchemy
-    ? "Image not found — ALCHEMY_API_KEY 已配置，但 Nobody 图片 IPFS 源全球不可用；已尝试 Reservoir/Alchemy/IPFS。可选：添加 RESERVOIR_API_KEY（reservoir.tools 免费）后重新部署。"
-    : "Image not found — 请确认 Cloudflare 已添加 ALCHEMY_API_KEY 并重新部署；Nobody PNG 在 IPFS 上经常 504。";
+  const msg = openseaKey
+    ? "Image not found — OPENSEA_API_KEY 已配置，但 OpenSea 未返回可用图片；已尝试 OpenSea/Alchemy/IPFS。"
+    : hasAlchemy
+      ? "Image not found — 请添加 OPENSEA_API_KEY（OpenSea 免费 instant key）并重新部署；Nobody PNG 在 IPFS 上经常 504。"
+      : "Image not found — 请添加 OPENSEA_API_KEY 与 ALCHEMY_API_KEY 后重新部署。";
 
   return new Response(msg, {
     status: 404,
     headers: {
       "Content-Type": "text/plain; charset=utf-8",
       "X-Alchemy-Configured": hasAlchemy ? "1" : "0",
-      "X-Reservoir-Configured": reservoirKey ? "1" : "0",
+      "X-Opensea-Configured": openseaKey ? "1" : "0",
     },
   });
 }
