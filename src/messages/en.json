@@ -21,7 +21,10 @@
     "switchNetwork": "Switch Network",
     "language": "Language",
     "loading": "Loading…",
-    "tbd": "TBD"
+    "tbd": "TBD",
+    "openInMetaMask": "Open in MetaMask",
+    "connectWalletConnect": "WalletConnect",
+    "connectFailed": "Connection failed — try again"
   },
   "home": {
     "badge": "MULTI-COLLECTION · ETH → BSC",

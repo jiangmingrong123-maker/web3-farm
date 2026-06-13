@@ -16,8 +16,12 @@
   },
   "dependencies": {
     "@tanstack/react-query": "^5.101.0",
+    "@wagmi/connectors": "^8.0.15",
+    "@wagmi/core": "^3.5.0",
+    "@walletconnect/ethereum-provider": "^2.23.9",
     "next": "14.2.35",
     "next-intl": "^4.13.0",
+    "porto": "^0.2.37",
     "react": "^18",
     "react-dom": "^18",
     "viem": "^2.52.2",

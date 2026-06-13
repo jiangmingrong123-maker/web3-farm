@@ -21,7 +21,10 @@
     "switchNetwork": "切换网络",
     "language": "语言",
     "loading": "加载中…",
-    "tbd": "待定"
+    "tbd": "待定",
+    "openInMetaMask": "在 MetaMask 中打开",
+    "connectWalletConnect": "WalletConnect",
+    "connectFailed": "连接失败，请重试"
   },
   "home": {
     "badge": "MULTI-COLLECTION · ETH → BSC",
