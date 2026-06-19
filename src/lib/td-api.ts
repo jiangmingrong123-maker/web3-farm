@@ -98,40 +98,72 @@ export async function startTdRunApi(
   wallet: string,
   stage: number,
   sign: TdSignFn,
-): Promise<{ profile: TdProfile; runId: string } | null> {
+): Promise<{ profile: TdProfile; runId: string; finishToken: string } | null> {
   const data = await signedPost<{
     ok?: boolean;
     profile?: TdProfile;
     runId?: string;
+    finishToken?: string;
   }>(wallet, "start", "td-start", { stage }, sign, `stage=${stage}`);
-  if (!data?.ok || !data.profile || !data.runId) return null;
-  return { profile: data.profile, runId: data.runId };
+  if (!data?.ok || !data.profile || !data.runId || !data.finishToken) return null;
+  return {
+    profile: data.profile,
+    runId: data.runId,
+    finishToken: data.finishToken,
+  };
 }
 
 export async function finishTdRunApi(
   wallet: string,
   sign: TdSignFn,
-  payload: { runId: string; cleared: boolean; wavesReached: number },
+  payload: {
+    runId: string;
+    cleared: boolean;
+    wavesReached: number;
+    finishToken?: string;
+  },
 ): Promise<{ profile: TdProfile; goldEarned: number; cleared: boolean } | null> {
-  const data = await signedPost<{
-    ok?: boolean;
-    profile?: TdProfile;
-    goldEarned?: number;
-    cleared?: boolean;
-  }>(
-    wallet,
-    "finish",
-    "td-finish",
-    payload,
-    sign,
-    `runId=${payload.runId}:cleared=${payload.cleared ? 1 : 0}`,
-  );
-  if (!data?.ok || !data.profile) return null;
-  return {
-    profile: data.profile,
-    goldEarned: data.goldEarned ?? 0,
-    cleared: !!data.cleared,
-  };
+  try {
+    const body: Record<string, unknown> = {
+      runId: payload.runId,
+      cleared: payload.cleared,
+      wavesReached: payload.wavesReached,
+    };
+    if (payload.finishToken) {
+      body.finishToken = payload.finishToken;
+    } else {
+      const timestamp = Date.now();
+      const message = buildFarmSignMessage(
+        "td-finish",
+        wallet,
+        timestamp,
+        `runId=${payload.runId}:cleared=${payload.cleared ? 1 : 0}`,
+      );
+      const signature = await sign(message);
+      body.timestamp = timestamp;
+      body.signature = signature;
+    }
+    const res = await fetch(`${API}/${wallet.toLowerCase()}/finish`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      ok?: boolean;
+      profile?: TdProfile;
+      goldEarned?: number;
+      cleared?: boolean;
+    };
+    if (!data?.ok || !data.profile) return null;
+    return {
+      profile: data.profile,
+      goldEarned: data.goldEarned ?? 0,
+      cleared: !!data.cleared,
+    };
+  } catch {
+    return null;
+  }
 }
 
 export async function exchangeTdGoldApi(

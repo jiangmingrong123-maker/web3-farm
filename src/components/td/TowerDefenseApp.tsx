@@ -7,7 +7,7 @@ import { useFarmSign } from "@/lib/web3/use-farm-sign";
 import { STAGE1_NAME } from "@/config/td/stage1";
 import { SHOP_ITEMS } from "@/config/td/shop";
 import { STAMINA_PER_RUN, STAMINA_REFILL_AMOUNT } from "@/config/td/economy";
-import { START_POPULARITY } from "@/config/td/units";
+import { defaultHeroSave, type HeroSave } from "@/config/td/rpg";
 import {
   buyTdShopItemApi,
   exchangeTdGoldApi,
@@ -18,13 +18,18 @@ import {
   type TdProfile,
 } from "@/lib/td-api";
 import {
-  createTextBattle,
-  isTextVictory,
-  mergeRosterUnits,
-  recruitUnit,
-  simulateWave,
-  type TextBattleState,
-} from "@/lib/td/text-combat";
+  createClimbRun,
+  fightNextFloor,
+  floorsCleared,
+  type ClimbRunState,
+} from "@/lib/td/rpg-combat";
+import {
+  applyUpgrade,
+  loadHeroSave,
+  saveHeroSave,
+  upgradeCost,
+  type UpgradeKind,
+} from "@/lib/td/rpg-storage";
 import {
   DEMO_FARM_POINTS,
   defaultDemoProfile,
@@ -35,11 +40,17 @@ import {
   demoRefill,
   demoRefillCost,
   demoStart,
+  demoUpgrade,
   isTdDevDemoEnabled,
 } from "@/lib/td/demo-store";
-import { TdTextBattle } from "@/components/td/TdTextBattle";
+import {
+  clearPendingRun,
+  loadPendingRun,
+  savePendingRun,
+} from "@/lib/td/rpg-run-storage";
+import { TdRpgClimb } from "@/components/td/TdRpgClimb";
+import { TdRpgHub } from "@/components/td/TdRpgHub";
 import { playTdSfx } from "@/lib/td/sfx";
-import type { TowerKind } from "@/lib/td/towers";
 
 type Screen = "hub" | "shop" | "play";
 
@@ -70,11 +81,14 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
   const [resultMsg, setResultMsg] = useState<string | null>(null);
 
   const [runId, setRunId] = useState<string | null>(null);
-  const [textBattle, setTextBattle] = useState<TextBattleState | null>(null);
+  const [heroSave, setHeroSave] = useState<HeroSave>(defaultHeroSave());
+  const [climb, setClimb] = useState<ClimbRunState | null>(null);
+  const [settling, setSettling] = useState(false);
   const [demoMode, setDemoMode] = useState(false);
   const devDemo = isTdDevDemoEnabled();
   const buffsRef = useRef<string[]>([]);
   const finishingRef = useRef(false);
+  const finishTokenRef = useRef<string | null>(null);
 
   const [screen, setScreen] = useState<Screen>("hub");
 
@@ -118,9 +132,146 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
     }
   }, [isConnected, address, refresh, demoMode]);
 
-  const updateBattle = (next: TextBattleState) => {
-    setTextBattle(next);
-  };
+  useEffect(() => {
+    const wallet = demoMode ? "demo" : address;
+    if (wallet) setHeroSave(loadHeroSave(wallet));
+  }, [address, demoMode]);
+
+  const walletKey = demoMode ? "demo" : address ?? "";
+
+  const persistActiveRun = useCallback(
+    (id: string, token: string, climbState: ClimbRunState) => {
+      if (demoMode || !walletKey) return;
+      savePendingRun(walletKey, {
+        runId: id,
+        finishToken: token,
+        climb: climbState,
+        updatedAt: Date.now(),
+      });
+    },
+    [demoMode, walletKey],
+  );
+
+  const showSettleMessage = useCallback(
+    (cleared: boolean, wavesReached: number, goldEarned: number) => {
+      if (cleared) {
+        setResultMsg(t("victoryResult", { gold: goldEarned }));
+      } else if (wavesReached > 0) {
+        setResultMsg(t("defeatResult", { gold: goldEarned }));
+      } else {
+        setResultMsg(t("forfeitResult", { gold: goldEarned }));
+      }
+    },
+    [t],
+  );
+
+  const settleRun = useCallback(
+    async (
+      cleared: boolean,
+      wavesReached: number,
+      activeId?: string | null,
+    ): Promise<boolean> => {
+      const id = activeId ?? runId ?? profile?.activeRunId;
+      if (!id || !profile) return false;
+
+      if (demoMode) {
+        const res = demoFinish(profile, cleared, wavesReached, id);
+        if (!res) return false;
+        setProfile(res.profile);
+        setRefillCost(demoRefillCost(res.profile));
+        setGoldExchangeCost(demoGoldExchangeCost(res.profile));
+        showSettleMessage(cleared, wavesReached, res.goldEarned);
+        clearPendingRun(walletKey);
+        return true;
+      }
+
+      if (!address) return false;
+      const token =
+        finishTokenRef.current ?? loadPendingRun(walletKey)?.finishToken ?? undefined;
+
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const res = await finishTdRunApi(address, sign, {
+          runId: id,
+          cleared,
+          wavesReached,
+          finishToken: token,
+        });
+        if (res) {
+          finishTokenRef.current = null;
+          clearPendingRun(walletKey);
+          setProfile(res.profile);
+          showSettleMessage(cleared, wavesReached, res.goldEarned);
+          await refresh();
+          return true;
+        }
+        if (attempt < 2) {
+          await new Promise((r) => setTimeout(r, 600 * (attempt + 1)));
+        }
+      }
+
+      const data = await fetchTdProfileApi(address);
+      if (data && !data.profile.activeRunId) {
+        finishTokenRef.current = null;
+        clearPendingRun(walletKey);
+        setProfile(data.profile);
+        setFarmPoints(data.farmPoints);
+        return true;
+      }
+      return false;
+    },
+    [
+      address,
+      demoMode,
+      profile,
+      refresh,
+      runId,
+      showSettleMessage,
+      sign,
+      walletKey,
+    ],
+  );
+
+  const autoSettleAndReturn = useCallback(
+    async (climbState: ClimbRunState) => {
+      if (finishingRef.current) return;
+      finishingRef.current = true;
+      setSettling(true);
+      setError(null);
+      const id = runId ?? profile?.activeRunId;
+      const token = finishTokenRef.current ?? loadPendingRun(walletKey)?.finishToken ?? "";
+      if (id && token) {
+        persistActiveRun(id, token, climbState);
+      }
+      const cleared = climbState.victory;
+      const waves = cleared ? climbState.maxFloor : floorsCleared(climbState);
+      const ok = await settleRun(cleared, waves);
+      setSettling(false);
+      setRunId(null);
+      setClimb(null);
+      setScreen("hub");
+      if (!ok && !demoMode) {
+        finishingRef.current = false;
+        setError(t("settleRetryHint"));
+      }
+    },
+    [demoMode, persistActiveRun, profile?.activeRunId, runId, settleRun, t, walletKey],
+  );
+
+  useEffect(() => {
+    if (demoMode || !address || !profile?.activeRunId) return;
+    const pending = loadPendingRun(address);
+    if (!pending || pending.runId !== profile.activeRunId) return;
+
+    finishTokenRef.current = pending.finishToken;
+    setRunId(pending.runId);
+    setClimb(pending.climb);
+
+    if (pending.climb.done) {
+      void autoSettleAndReturn(pending.climb);
+    } else if (screen === "hub") {
+      setScreen("play");
+    }
+  }, [address, autoSettleAndReturn, demoMode, profile?.activeRunId, screen]);
 
   const handleRefill = async () => {
     if (!profile) return;
@@ -179,57 +330,17 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
     refresh();
   };
 
-  const settleRun = async (
-    cleared: boolean,
-    wavesReached: number,
-    activeId?: string | null,
-  ) => {
-    const id = activeId ?? runId ?? profile?.activeRunId;
-    if (!id || !profile) return false;
-
-    if (demoMode) {
-      const res = demoFinish(profile, cleared, wavesReached, id);
-      if (!res) return false;
-      setProfile(res.profile);
-      setRefillCost(demoRefillCost(res.profile));
-      setGoldExchangeCost(demoGoldExchangeCost(res.profile));
-      if (cleared) {
-        setResultMsg(t("victoryResult", { gold: res.goldEarned }));
-      } else if (wavesReached > 0) {
-        setResultMsg(t("defeatResult", { gold: res.goldEarned }));
-      } else {
-        setResultMsg(t("forfeitResult", { gold: res.goldEarned }));
-      }
-      return true;
-    }
-
-    if (!address) return false;
-    setLoading(true);
-    const res = await finishTdRunApi(address, sign, {
-      runId: id,
-      cleared,
-      wavesReached,
-    });
-    setLoading(false);
-    if (!res) return false;
-    setProfile(res.profile);
-    if (cleared) {
-      setResultMsg(t("victoryResult", { gold: res.goldEarned }));
-    } else if (wavesReached > 0) {
-      setResultMsg(t("defeatResult", { gold: res.goldEarned }));
-    } else {
-      setResultMsg(t("forfeitResult", { gold: res.goldEarned }));
-    }
-    await refresh();
-    return true;
-  };
-
   const handleForfeit = async (wavesReached: number) => {
+    setSettling(true);
+    setError(null);
     const ok = await settleRun(false, wavesReached);
-    if (!ok && !demoMode) setError(t("forfeitFailed"));
+    setSettling(false);
+    if (!ok && !demoMode) setError(t("settleRetryHint"));
+    finishTokenRef.current = null;
     setRunId(null);
-    setTextBattle(null);
+    setClimb(null);
     setScreen("hub");
+    if (ok) clearPendingRun(walletKey);
   };
   const handleStart = async () => {
     if (!profile) return;
@@ -242,12 +353,11 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
       setProfile(res.profile);
       buffsRef.current = activeBuffIds(res.profile);
       finishingRef.current = false;
+      finishTokenRef.current = "demo";
       setRunId(res.runId);
-      setTextBattle(
-        createTextBattle(
-          START_POPULARITY + (buffsRef.current.includes("pack") ? 5 : 0),
-        ),
-      );
+      const climbState = createClimbRun();
+      setClimb(climbState);
+      persistActiveRun(res.runId, "demo", climbState);
       setScreen("play");
       setResultMsg(null);
       return;
@@ -263,63 +373,66 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
     }
     setProfile(res.profile);
     buffsRef.current = activeBuffIds(res.profile);
-    const pop2 =
-      START_POPULARITY + (buffsRef.current.includes("pack") ? 5 : 0);
     finishingRef.current = false;
+    finishTokenRef.current = res.finishToken;
     setRunId(res.runId);
-    setTextBattle(createTextBattle(pop2));
+    const climbState = createClimbRun();
+    setClimb(climbState);
+    persistActiveRun(res.runId, res.finishToken, climbState);
     setScreen("play");
     setResultMsg(null);
   };
 
-  const endRun = useCallback(
-    async (cleared: boolean, wavesReached: number) => {
-      const ok = await settleRun(cleared, wavesReached);
-      if (!ok && !demoMode) setError(t("forfeitFailed"));
-      finishingRef.current = true;
-      setRunId(null);
-      setTextBattle(null);
-      setScreen("hub");
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- settleRun closes over latest profile/runId
-    [address, demoMode, profile, runId, sign, t, refresh],
-  );
-
-  const handleRecruit = (kind: TowerKind) => {
-    if (!textBattle) return;
-    const next = recruitUnit(textBattle, kind);
-    if (next) {
-      playTdSfx("build");
-      updateBattle(next);
-    }
-  };
-
-  const handleRosterMerge = (fromId: string, toId: string) => {
-    if (!textBattle) return;
-    const next = mergeRosterUnits(textBattle, fromId, toId);
-    if (next) {
-      playTdSfx("build");
-      updateBattle(next);
-    }
-  };
-
-  const handleFightWave = () => {
-    if (!textBattle) return;
+  const handleNextFloor = () => {
+    if (!climb || settling) return;
     playTdSfx("wave_start");
-    const next = simulateWave(textBattle, buffsRef.current, locale);
-    updateBattle(next);
-    if (next.phase === "done") {
-      if (isTextVictory(next)) playTdSfx("victory");
+    const next = fightNextFloor(climb, heroSave, buffsRef.current, locale);
+    setClimb(next);
+    const id = runId ?? profile?.activeRunId;
+    const token = finishTokenRef.current ?? loadPendingRun(walletKey)?.finishToken ?? "";
+    if (id && token) persistActiveRun(id, token, next);
+    if (next.done) {
+      if (next.victory) playTdSfx("victory");
       else playTdSfx("defeat");
+      void autoSettleAndReturn(next);
     } else {
       playTdSfx("wave_clear");
     }
   };
 
-  const handleBattleFinish = () => {
-    if (!textBattle) return;
-    if (isTextVictory(textBattle)) void endRun(true, textBattle.wave);
-    else void endRun(false, textBattle.wave);
+  const handleClimbFinish = () => {
+    if (!climb || settling) return;
+    void autoSettleAndReturn(climb);
+  };
+
+  const handleUpgrade = (kind: UpgradeKind) => {
+    if (!profile) return;
+    const cost = upgradeCost(heroSave, kind);
+    if (cost == null || profile.gold < cost) {
+      setError(t("upgradeFailed"));
+      return;
+    }
+    if (demoMode) {
+      const res = demoUpgrade(profile, heroSave, kind);
+      if (!res) {
+        setError(t("upgradeFailed"));
+        return;
+      }
+      setProfile(res.profile);
+      setHeroSave(res.hero);
+      saveHeroSave(walletKey, res.hero);
+      setError(null);
+      return;
+    }
+    const nextHero = applyUpgrade(heroSave, kind);
+    if (!nextHero) {
+      setError(t("upgradeFailed"));
+      return;
+    }
+    setProfile({ ...profile, gold: profile.gold - cost });
+    setHeroSave(nextHero);
+    saveHeroSave(walletKey, nextHero);
+    setError(null);
   };
 
   const handleBuy = async (itemId: string) => {
@@ -394,8 +507,8 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
           <button
             type="button"
             onClick={() => {
-              if (screen === "play" && textBattle) {
-                handleForfeit(textBattle.wave);
+              if (screen === "play" && climb) {
+                handleForfeit(floorsCleared(climb));
               } else {
                 setScreen("hub");
               }
@@ -453,20 +566,31 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
             </div>
           )}
 
-          {profile.activeRunId && (
+          {profile.activeRunId && !settling && (
             <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4">
               <p className="text-sm text-amber-200">{t("runInProgress")}</p>
               <p className="mt-1 text-xs text-amber-200/70">{t("runInProgressHint")}</p>
               <button
                 type="button"
-                disabled={loading}
-                onClick={() => handleForfeit(0)}
-                className="mt-2 text-sm underline text-amber-300"
+                disabled={loading || settling}
+                onClick={() => {
+                  const pending = loadPendingRun(walletKey);
+                  handleForfeit(pending ? floorsCleared(pending.climb) : 0);
+                }}
+                className="mt-2 text-sm underline text-amber-300 disabled:opacity-40"
               >
                 {t("forfeit")}
               </button>
             </div>
           )}
+
+          {settling && (
+            <p className="rounded-lg border border-gold/30 bg-gold/10 px-4 py-2 text-sm text-gold">
+              {t("settling")}
+            </p>
+          )}
+
+          <TdRpgHub save={heroSave} gold={profile.gold} onUpgrade={handleUpgrade} />
 
           <div className="flex flex-wrap gap-3">
             <button
@@ -543,15 +667,12 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
         </div>
       )}
 
-      {screen === "play" && textBattle && (
-        <TdTextBattle
-          battle={textBattle}
-          buffs={buffs}
-          locale={locale}
-          onRecruit={handleRecruit}
-          onMerge={handleRosterMerge}
-          onFightWave={handleFightWave}
-          onFinish={handleBattleFinish}
+      {screen === "play" && climb && (
+        <TdRpgClimb
+          climb={climb}
+          settling={settling}
+          onNextFloor={handleNextFloor}
+          onFinish={handleClimbFinish}
         />
       )}
 

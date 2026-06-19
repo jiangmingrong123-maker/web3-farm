@@ -9,7 +9,13 @@ import {
   refillPointsCost,
   stageClearGold,
 } from "@/config/td/economy";
+import type { HeroSave } from "@/config/td/rpg";
 import type { TdProfile } from "@/lib/td-api";
+import {
+  applyUpgrade,
+  upgradeCost,
+  type UpgradeKind,
+} from "@/lib/td/rpg-storage";
 
 const SHOP: Record<string, { price: number; kind: "passive" | "active" }> = {
   notice: { price: 25, kind: "passive" },
@@ -148,6 +154,21 @@ export function demoBuy(profile: TdProfile, itemId: string): TdProfile | null {
         usesLeft: item.kind === "active" ? 1 : undefined,
       },
     },
+  };
+}
+
+export function demoUpgrade(
+  profile: TdProfile,
+  hero: HeroSave,
+  kind: UpgradeKind,
+): { profile: TdProfile; hero: HeroSave } | null {
+  const cost = upgradeCost(hero, kind);
+  if (cost == null || profile.gold < cost) return null;
+  const nextHero = applyUpgrade(hero, kind);
+  if (!nextHero) return null;
+  return {
+    profile: { ...profile, gold: profile.gold - cost },
+    hero: nextHero,
   };
 }
 

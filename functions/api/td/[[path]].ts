@@ -16,7 +16,7 @@ const STAMINA_PER_RUN = 5;
 const REFILL_BASE_POINTS = 10;
 const GOLD_EXCHANGE_BASE_POINTS = 100;
 const GOLD_EXCHANGE_REWARD = 100;
-const RUN_STALE_MS = 2 * 60 * 60 * 1000;
+const RUN_STALE_MS = 20 * 60 * 1000;
 const FAIL_CONSOLATION_GOLD = 3;
 
 const SHOP: Record<string, { price: number; kind: "passive" | "active" }> = {
@@ -70,6 +70,7 @@ interface ActiveRun {
   wallet: string;
   stage: number;
   startedAt: number;
+  finishToken: string;
 }
 
 const NO_CACHE = {
@@ -185,8 +186,11 @@ async function reconcileActiveRun(
   if (!stale) return profile;
 
   if (run) await deleteRun(env, profile.activeRunId);
+  const staleGold =
+    run && now - startedAt > 60_000 ? FAIL_CONSOLATION_GOLD : 0;
   return {
     ...profile,
+    gold: profile.gold + staleGold,
     activeRunId: null,
     activeRunStage: null,
     activeRunStartedAt: null,
@@ -355,8 +359,9 @@ export const onRequest = async (context: {
     }
 
     const runId = `${wallet.slice(2, 10)}_${Date.now().toString(36)}`;
+    const finishToken = crypto.randomUUID();
     const now = Date.now();
-    await saveRun(env, { runId, wallet, stage, startedAt: now });
+    await saveRun(env, { runId, wallet, stage, startedAt: now, finishToken });
 
     profile = {
       ...profile,
@@ -366,28 +371,38 @@ export const onRequest = async (context: {
       activeRunStartedAt: now,
     };
     const saved = await saveTd(env, wallet, profile);
-    return json({ ok: true, profile: saved, runId, activeBuffs: saved.buffs });
+    return json({ ok: true, profile: saved, runId, finishToken, activeBuffs: saved.buffs });
   }
 
   if (path[1] === "finish" && request.method === "POST") {
     const body = await parseJson<
-      SignedBody & { runId?: string; cleared?: boolean; wavesReached?: number }
+      SignedBody & {
+        runId?: string;
+        cleared?: boolean;
+        wavesReached?: number;
+        finishToken?: string;
+      }
     >(request);
     if (!body) return new Response("Bad JSON", { status: 400 });
     const runId = (body.runId ?? "").trim();
     const cleared = !!body.cleared;
     const wavesReached = Math.max(0, Math.min(20, Number(body.wavesReached) || 0));
-    const auth = await requireWalletSignature(
-      "td-finish",
-      wallet,
-      body,
-      `runId=${runId}:cleared=${cleared ? 1 : 0}`,
-    );
-    if (auth) return auth;
+    const finishToken = (body.finishToken ?? "").trim();
 
     const run = await loadRun(env, runId);
     if (!run || run.wallet !== wallet) {
       return json({ ok: false, error: "INVALID_RUN" }, 400);
+    }
+
+    const tokenOk = finishToken.length > 0 && finishToken === run.finishToken;
+    if (!tokenOk) {
+      const auth = await requireWalletSignature(
+        "td-finish",
+        wallet,
+        body,
+        `runId=${runId}:cleared=${cleared ? 1 : 0}`,
+      );
+      if (auth) return auth;
     }
 
     let profile = await loadTd(env, wallet);
