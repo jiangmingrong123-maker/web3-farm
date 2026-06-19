@@ -10,7 +10,8 @@
     "collections": "Collections",
     "points": "Points",
     "docs": "Docs",
-    "td": "TD"
+    "td": "TD",
+    "menu": "Menu"
   },
   "common": {
     "connectWallet": "Connect Wallet",
@@ -41,7 +42,11 @@
     "entryBadge": "SEASON 0 · TRIAL",
     "entryTitle": "Enter My Exhibition Hall",
     "entryDesc": "12 slots — bind Nobody NFTs, claim daily points, unlock pedestals.",
-    "entryCta": "Enter Hall"
+    "entryCta": "Enter Hall",
+    "tdEntryBadge": "TOWER DEFENSE · NEW",
+    "tdEntryTitle": "Little People · Red Carpet",
+    "tdEntryDesc": "Spend hall points on stamina, merge crew, defend the carpet.",
+    "tdEntryCta": "Play Now"
   },
   "tier": {
     "SPECIAL": "Special · has special trait",
@@ -94,7 +99,10 @@
     "slotEmpty": "Empty slot",
     "tapToBind": "Tap to bind NFT",
     "unlock": "Unlock",
+    "unlocking": "Confirm signature in wallet…",
+    "unlockPromo": "Unlock slot {slot} ({cost} pts)",
     "unlockNeedPoints": "Need more pts",
+    "unlockShortfall": "Slot {slot} needs {short} more pts ({have} / {need})",
     "unlockHintPoints": "Balance {have}, need {need} pts",
     "unlockHintSign": "Unlock requires wallet signature (no gas)",
     "errInsufficientPoints": "Not enough points: need {need}, have {have}",

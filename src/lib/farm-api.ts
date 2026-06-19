@@ -8,6 +8,15 @@ const API = "/api/farm";
 
 export type FarmSignFn = (message: string) => Promise<`0x${string}`>;
 
+function isSignRejected(err: unknown): boolean {
+  const msg =
+    err instanceof Error ? err.message
+    : typeof err === "object" && err && "shortMessage" in err
+      ? String((err as { shortMessage?: string }).shortMessage)
+      : String(err);
+  return /reject|denied|cancel|declined|user refused/i.test(msg);
+}
+
 async function signedPost<T>(
   wallet: string,
   subpath: string,
@@ -115,7 +124,8 @@ export async function unlockSlotApi(
       unlockedSlots: data.unlockedSlots,
       needSlot: data.needSlot,
     };
-  } catch {
+  } catch (e) {
+    if (isSignRejected(e)) return { error: "SIGN_REJECTED" };
     return { error: "NETWORK" };
   }
 }

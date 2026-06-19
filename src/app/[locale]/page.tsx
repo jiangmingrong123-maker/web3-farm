@@ -41,7 +41,7 @@ export default async function HomePage({
         <p className="mt-3 text-xs text-white/35">{t("phase")}</p>
       </section>
 
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="flex flex-col gap-4">
         <FarmEntryCard />
         <SwapEntryCard />
       </div>

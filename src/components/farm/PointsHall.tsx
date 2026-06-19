@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { useAccount, useSignMessage } from "wagmi";
+import { mainnet } from "wagmi/chains";
 import { AddNftPanel } from "@/components/swap/AddNftPanel";
 import {
   DAILY_POINTS_CAP,
@@ -33,6 +34,7 @@ import {
   type FarmState,
 } from "@/lib/farm-storage";
 import type { VerifiedNft } from "@/lib/nft/verify";
+import { TdEntryBanner } from "@/components/home/TdEntryBanner";
 import { ExhibitSlot, type SlotStatus } from "./ExhibitSlot";
 
 function formatCountdown(ms: number, locale: string) {
@@ -48,13 +50,15 @@ function formatPts(n: number) {
 
 export function PointsHall({ locale }: { locale: string }) {
   const t = useTranslations("hall");
-  const { address, isConnected } = useAccount();
+  const tCommon = useTranslations("common");
+  const { address, isConnected, chainId } = useAccount();
   const { signMessageAsync } = useSignMessage();
   const [state, setState] = useState<FarmState | null>(null);
   const [bindingSlot, setBindingSlot] = useState<number | null>(null);
   const [bindError, setBindError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [bindingsRemoved, setBindingsRemoved] = useState<string[]>([]);
+  const [unlockingSlot, setUnlockingSlot] = useState<number | null>(null);
   const [, setTick] = useState(0);
 
   const sign: FarmSignFn = useCallback(
@@ -158,60 +162,65 @@ export function PointsHall({ locale }: { locale: string }) {
   };
 
   const handleUnlock = async (slotIndex: number) => {
-    if (!address) return;
+    if (!address || unlockingSlot != null) return;
     setActionError(null);
+    setUnlockingSlot(slotIndex);
 
-    const fresh = await refreshFromServer();
-    const current = fresh ?? state;
-    if (!current) return;
+    try {
+      const fresh = await refreshFromServer();
+      const current = fresh ?? state;
+      if (!current) return;
 
-    const cost = SLOT_UNLOCK_COSTS[slotIndex] ?? 0;
-    const balance = Math.floor(current.points * 100) / 100;
+      const cost = SLOT_UNLOCK_COSTS[slotIndex] ?? 0;
+      const balance = Math.floor(current.points * 100) / 100;
 
-    if (slotIndex !== current.unlockedSlots + 1) {
-      setActionError(
-        t("errUnlockOrderDetail", {
-          slot: String(current.unlockedSlots + 1).padStart(2, "0"),
-        }),
-      );
-      return;
-    }
-    if (balance < cost) {
-      setActionError(t("errInsufficientPoints", { need: cost, have: Math.floor(balance) }));
-      return;
-    }
+      if (slotIndex !== current.unlockedSlots + 1) {
+        setActionError(
+          t("errUnlockOrderDetail", {
+            slot: String(current.unlockedSlots + 1).padStart(2, "0"),
+          }),
+        );
+        return;
+      }
+      if (balance < cost) {
+        setActionError(t("errInsufficientPoints", { need: cost, have: Math.floor(balance) }));
+        return;
+      }
 
-    const result = await unlockSlotApi(address, slotIndex, sign);
-    if ("state" in result) {
-      applyState(address, result.state);
-      return;
+      const result = await unlockSlotApi(address, slotIndex, sign);
+      if ("state" in result) {
+        applyState(address, result.state);
+        return;
+      }
+      if (result.error === "SIGN_REJECTED") {
+        setActionError(t("errSignRejected"));
+        return;
+      }
+      if (result.error === "ALREADY_UNLOCKED" || result.error === "UNLOCK_ORDER") {
+        const synced = await refreshFromServer();
+        const nextSlot = synced?.unlockedSlots ?? result.unlockedSlots ?? current.unlockedSlots;
+        setActionError(
+          t("errUnlockOrderDetail", { slot: String(nextSlot + 1).padStart(2, "0") }),
+        );
+        return;
+      }
+      if (result.error === "UNLOCK_FAILED") {
+        setActionError(t("errUnlockOrder"));
+        return;
+      }
+      if (result.error === "INSUFFICIENT_POINTS") {
+        setActionError(
+          t("errInsufficientPoints", {
+            need: result.need ?? cost,
+            have: Math.floor(result.have ?? balance),
+          }),
+        );
+        return;
+      }
+      setActionError(t("actionFailed"));
+    } finally {
+      setUnlockingSlot(null);
     }
-    if (result.error === "SIGN_REJECTED") {
-      setActionError(t("errSignRejected"));
-      return;
-    }
-    if (result.error === "ALREADY_UNLOCKED" || result.error === "UNLOCK_ORDER") {
-      const synced = await refreshFromServer();
-      const nextSlot = synced?.unlockedSlots ?? result.unlockedSlots ?? current.unlockedSlots;
-      setActionError(
-        t("errUnlockOrderDetail", { slot: String(nextSlot + 1).padStart(2, "0") }),
-      );
-      return;
-    }
-    if (result.error === "UNLOCK_FAILED") {
-      setActionError(t("errUnlockOrder"));
-      return;
-    }
-    if (result.error === "INSUFFICIENT_POINTS") {
-      setActionError(
-        t("errInsufficientPoints", {
-          need: result.need ?? cost,
-          have: Math.floor(result.have ?? balance),
-        }),
-      );
-      return;
-    }
-    setActionError(t("actionFailed"));
   };
 
   const handleBindNft = async (nft: VerifiedNft) => {
@@ -264,9 +273,24 @@ export function PointsHall({ locale }: { locale: string }) {
   const nextUnlockSlot = state ? state.unlockedSlots + 1 : 3;
   const nextUnlockCost = SLOT_UNLOCK_COSTS[nextUnlockSlot] ?? 0;
   const pointBalance = state ? Math.floor(state.points) : 0;
+  const canUnlockNext =
+    !!state &&
+    nextUnlockSlot <= HALL_SLOT_COUNT &&
+    pointBalance >= nextUnlockCost;
+  const isUnlockingNext = unlockingSlot === nextUnlockSlot;
+  const pointsShortfall = Math.max(0, nextUnlockCost - pointBalance);
+  const wrongNetwork = isConnected && chainId !== mainnet.id;
 
   return (
     <div className="space-y-8">
+      <TdEntryBanner />
+
+      {wrongNetwork && (
+        <p className="rounded-xl border border-amber-400/50 bg-amber-500/15 px-4 py-3 text-center text-sm text-amber-100">
+          {tCommon("wrongNetwork")}
+        </p>
+      )}
+
       <section className="relative overflow-hidden rounded-2xl border border-gold/20 bg-gradient-to-br from-surface via-ink to-black p-6 sm:p-8">
         <div className="pointer-events-none absolute -right-20 -top-20 h-56 w-56 rounded-full bg-gold/10 blur-3xl" />
         <div className="pointer-events-none absolute -bottom-16 -left-16 h-40 w-40 rounded-full bg-purple-500/10 blur-3xl" />
@@ -366,6 +390,38 @@ export function PointsHall({ locale }: { locale: string }) {
           </div>
         </div>
 
+        {ready && nextUnlockSlot <= HALL_SLOT_COUNT && (
+          <div className="mb-4 rounded-xl border border-gold/30 bg-gold/10 p-4 sm:hidden">
+            {canUnlockNext ? (
+              <p className="text-center text-xs text-white/55">{t("unlockHintSign")}</p>
+            ) : (
+              <p className="text-center text-xs text-amber-200/90">
+                {t("unlockShortfall", {
+                  slot: String(nextUnlockSlot).padStart(2, "0"),
+                  short: pointsShortfall,
+                  have: pointBalance,
+                  need: nextUnlockCost,
+                })}
+              </p>
+            )}
+            <button
+              type="button"
+              disabled={!address || unlockingSlot != null || wrongNetwork}
+              onClick={() => void handleUnlock(nextUnlockSlot)}
+              className="mt-3 w-full rounded-full bg-gold px-5 py-3 text-sm font-bold text-ink transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              {isUnlockingNext
+                ? t("unlocking")
+                : canUnlockNext
+                  ? t("unlockPromo", {
+                      slot: String(nextUnlockSlot).padStart(2, "0"),
+                      cost: nextUnlockCost,
+                    })
+                  : t("unlockNeedPoints")}
+            </button>
+          </div>
+        )}
+
         <div className="rounded-2xl border border-white/8 bg-surface/40 p-4 sm:p-6">
           <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 sm:gap-4">
             {Array.from({ length: HALL_SLOT_COUNT }, (_, i) => {
@@ -399,6 +455,7 @@ export function PointsHall({ locale }: { locale: string }) {
                   isNextUnlock={isNextUnlock}
                   canUnlock={canUnlock}
                   unlockHint={unlockHint}
+                  unlocking={unlockingSlot === index}
                   onUnlock={() => void handleUnlock(index)}
                   onBind={
                     isConnected && status === "empty"

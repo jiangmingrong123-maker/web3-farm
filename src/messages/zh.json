@@ -10,7 +10,8 @@
     "collections": "集合",
     "points": "积分",
     "docs": "文档",
-    "td": "小人物"
+    "td": "小人物",
+    "menu": "菜单"
   },
   "common": {
     "connectWallet": "连接钱包",
@@ -41,7 +42,11 @@
     "entryBadge": "SEASON 0 · 试玩",
     "entryTitle": "进入我的展馆",
     "entryDesc": "12 格展柜，绑定 Nobody 展示，每日领积分、解锁展位。",
-    "entryCta": "进入展馆"
+    "entryCta": "进入展馆",
+    "tdEntryBadge": "塔防试玩 · 新",
+    "tdEntryTitle": "小人物 · 红毯初登",
+    "tdEntryDesc": "用展馆积分换体力，合成群/粉/编/导，守住红毯。",
+    "tdEntryCta": "开始游戏"
   },
   "tier": {
     "SPECIAL": "Special · 有 special 属性",
@@ -94,7 +99,10 @@
     "slotEmpty": "空展位",
     "tapToBind": "点击绑定 NFT",
     "unlock": "解锁",
+    "unlocking": "请在钱包中确认签名…",
+    "unlockPromo": "解锁 {slot} 号展位（{cost} 分）",
     "unlockNeedPoints": "积分不足",
+    "unlockShortfall": "{slot} 号还需 {short} 分（当前 {have} / 需要 {need}）",
     "unlockHintPoints": "余额 {have}，需要 {need} 分",
     "unlockHintSign": "解锁需钱包签名（不扣 gas）",
     "errInsufficientPoints": "积分不足：需要 {need} 分，当前 {have} 分",
