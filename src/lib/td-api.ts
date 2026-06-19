@@ -14,6 +14,7 @@ export type TdProfile = {
   unlockedStage: number;
   buffs: Record<string, TdBuff>;
   refillCountToday: number;
+  goldExchangeCountToday: number;
   refillDayKey: string;
   activeRunId: string | null;
   activeRunStage: number | null;
@@ -49,7 +50,8 @@ async function signedPost<T>(
 export async function fetchTdProfileApi(wallet: string): Promise<{
   profile: TdProfile;
   farmPoints: number;
-  refillCost: number | null;
+  refillCost: number;
+  goldExchangeCost: number;
 } | null> {
   try {
     const res = await fetch(`${API}/${wallet.toLowerCase()}`, { cache: "no-store" });
@@ -58,13 +60,15 @@ export async function fetchTdProfileApi(wallet: string): Promise<{
       ok?: boolean;
       profile?: TdProfile;
       farmPoints?: number;
-      refillCost?: number | null;
+      refillCost?: number;
+      goldExchangeCost?: number;
     };
     if (!data.ok || !data.profile) return null;
     return {
       profile: data.profile,
       farmPoints: data.farmPoints ?? 0,
-      refillCost: data.refillCost ?? null,
+      refillCost: data.refillCost ?? 0,
+      goldExchangeCost: data.goldExchangeCost ?? 0,
     };
   } catch {
     return null;
@@ -127,6 +131,27 @@ export async function finishTdRunApi(
     profile: data.profile,
     goldEarned: data.goldEarned ?? 0,
     cleared: !!data.cleared,
+  };
+}
+
+export async function exchangeTdGoldApi(
+  wallet: string,
+  sign: TdSignFn,
+): Promise<{ profile: TdProfile; farmPoints: number; pointsSpent: number; goldGained: number } | null> {
+  const data = await signedPost<{
+    ok?: boolean;
+    profile?: TdProfile;
+    farmPoints?: number;
+    pointsSpent?: number;
+    goldGained?: number;
+    error?: string;
+  }>(wallet, "exchange-gold", "td-exchange-gold", {}, sign);
+  if (!data?.ok || !data.profile) return null;
+  return {
+    profile: data.profile,
+    farmPoints: data.farmPoints ?? 0,
+    pointsSpent: data.pointsSpent ?? 0,
+    goldGained: data.goldGained ?? 0,
   };
 }
 

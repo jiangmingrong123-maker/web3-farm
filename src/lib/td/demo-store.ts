@@ -1,8 +1,11 @@
 import { BUFF_DURATION_MS } from "@/config/td/shop";
 import {
   FAIL_CONSOLATION_GOLD,
+  GOLD_EXCHANGE_REWARD,
   STAMINA_MAX,
   STAMINA_PER_RUN,
+  STAMINA_REFILL_AMOUNT,
+  goldExchangeCost,
   refillPointsCost,
   stageClearGold,
 } from "@/config/td/economy";
@@ -31,6 +34,7 @@ export function defaultDemoProfile(): TdProfile {
     unlockedStage: 1,
     buffs: {},
     refillCountToday: 0,
+    goldExchangeCountToday: 0,
     refillDayKey: dayKey(),
     activeRunId: null,
     activeRunStage: null,
@@ -40,26 +44,46 @@ export function defaultDemoProfile(): TdProfile {
 
 export const DEMO_FARM_POINTS = 500;
 
-export function demoRefillCost(profile: TdProfile): number | null {
-  if (profile.stamina >= STAMINA_MAX) return null;
+export function demoRefillCost(profile: TdProfile): number {
   return refillPointsCost(profile.refillCountToday);
+}
+
+export function demoGoldExchangeCost(profile: TdProfile): number {
+  return goldExchangeCost(profile.goldExchangeCountToday);
 }
 
 export function demoRefill(
   profile: TdProfile,
   farmPoints: number,
 ): { profile: TdProfile; farmPoints: number; pointsSpent: number } | null {
-  if (profile.stamina >= STAMINA_MAX) return null;
   const cost = refillPointsCost(profile.refillCountToday);
   if (farmPoints < cost) return null;
   return {
     profile: {
       ...profile,
-      stamina: STAMINA_MAX,
+      stamina: profile.stamina + STAMINA_REFILL_AMOUNT,
       refillCountToday: profile.refillCountToday + 1,
     },
     farmPoints: farmPoints - cost,
     pointsSpent: cost,
+  };
+}
+
+export function demoExchangeGold(
+  profile: TdProfile,
+  farmPoints: number,
+): { profile: TdProfile; farmPoints: number; pointsSpent: number; goldGained: number } | null {
+  const cost = goldExchangeCost(profile.goldExchangeCountToday);
+  if (farmPoints < cost) return null;
+  return {
+    profile: {
+      ...profile,
+      gold: profile.gold + GOLD_EXCHANGE_REWARD,
+      goldExchangeCountToday: profile.goldExchangeCountToday + 1,
+    },
+    farmPoints: farmPoints - cost,
+    pointsSpent: cost,
+    goldGained: GOLD_EXCHANGE_REWARD,
   };
 }
 
@@ -83,7 +107,11 @@ export function demoFinish(
   profile: TdProfile,
   cleared: boolean,
   wavesReached: number,
-): { profile: TdProfile; goldEarned: number } {
+  runId?: string | null,
+): { profile: TdProfile; goldEarned: number } | null {
+  const activeId = runId ?? profile.activeRunId;
+  if (!activeId || profile.activeRunId !== activeId) return null;
+
   let goldEarned = 0;
   let unlockedStage = profile.unlockedStage;
   if (cleared) {

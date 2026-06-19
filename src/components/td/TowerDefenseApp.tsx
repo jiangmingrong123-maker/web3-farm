@@ -7,10 +7,11 @@ import { TD_TICK_MS } from "@/config/td/pacing";
 import { STAGE1_NAME } from "@/config/td/stage1";
 import { STAGE1_TAGLINE } from "@/config/td/stage-theme";
 import { SHOP_ITEMS } from "@/config/td/shop";
-import { STAMINA_MAX, STAMINA_PER_RUN } from "@/config/td/economy";
+import { STAMINA_PER_RUN, STAMINA_REFILL_AMOUNT } from "@/config/td/economy";
 import { START_POPULARITY } from "@/config/td/units";
 import {
   buyTdShopItemApi,
+  exchangeTdGoldApi,
   fetchTdProfileApi,
   finishTdRunApi,
   refillTdStaminaApi,
@@ -33,7 +34,9 @@ import {
   DEMO_FARM_POINTS,
   defaultDemoProfile,
   demoBuy,
+  demoExchangeGold,
   demoFinish,
+  demoGoldExchangeCost,
   demoRefill,
   demoRefillCost,
   demoStart,
@@ -72,7 +75,8 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
   const [screen, setScreen] = useState<Screen>("hub");
   const [profile, setProfile] = useState<TdProfile | null>(null);
   const [farmPoints, setFarmPoints] = useState(0);
-  const [refillCost, setRefillCost] = useState<number | null>(null);
+  const [refillCost, setRefillCost] = useState(0);
+  const [goldExchangeCost, setGoldExchangeCost] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [resultMsg, setResultMsg] = useState<string | null>(null);
@@ -109,6 +113,7 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
     setProfile(p);
     setFarmPoints(DEMO_FARM_POINTS);
     setRefillCost(demoRefillCost(p));
+    setGoldExchangeCost(demoGoldExchangeCost(p));
     buffsRef.current = [];
     setError(null);
     setResultMsg(null);
@@ -129,6 +134,7 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
     setProfile(data.profile);
     setFarmPoints(data.farmPoints);
     setRefillCost(data.refillCost);
+    setGoldExchangeCost(data.goldExchangeCost);
     buffsRef.current = activeBuffIds(data.profile);
   }, [address, t, demoMode]);
 
@@ -183,6 +189,7 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
       setProfile(res.profile);
       setFarmPoints(res.farmPoints);
       setRefillCost(demoRefillCost(res.profile));
+      setGoldExchangeCost(demoGoldExchangeCost(res.profile));
       return;
     }
     if (!address) return;
@@ -199,6 +206,87 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
     refresh();
   };
 
+  const handleExchangeGold = async () => {
+    if (!profile) return;
+    if (demoMode) {
+      const res = demoExchangeGold(profile, farmPoints);
+      if (!res) {
+        setError(t("exchangeFailed"));
+        return;
+      }
+      setProfile(res.profile);
+      setFarmPoints(res.farmPoints);
+      setGoldExchangeCost(demoGoldExchangeCost(res.profile));
+      setResultMsg(t("exchangeResult", { gold: res.goldGained, cost: res.pointsSpent }));
+      return;
+    }
+    if (!address) return;
+    setLoading(true);
+    setError(null);
+    const res = await exchangeTdGoldApi(address, sign);
+    setLoading(false);
+    if (!res) {
+      setError(t("exchangeFailed"));
+      return;
+    }
+    setProfile(res.profile);
+    setFarmPoints(res.farmPoints);
+    setResultMsg(t("exchangeResult", { gold: res.goldGained, cost: res.pointsSpent }));
+    refresh();
+  };
+
+  const settleRun = async (
+    cleared: boolean,
+    wavesReached: number,
+    activeId?: string | null,
+  ) => {
+    const id = activeId ?? runId ?? profile?.activeRunId;
+    if (!id || !profile) return false;
+
+    if (demoMode) {
+      const res = demoFinish(profile, cleared, wavesReached, id);
+      if (!res) return false;
+      setProfile(res.profile);
+      setRefillCost(demoRefillCost(res.profile));
+      setGoldExchangeCost(demoGoldExchangeCost(res.profile));
+      if (cleared) {
+        setResultMsg(t("victoryResult", { gold: res.goldEarned }));
+      } else if (wavesReached > 0) {
+        setResultMsg(t("defeatResult", { gold: res.goldEarned }));
+      } else {
+        setResultMsg(t("forfeitResult", { gold: res.goldEarned }));
+      }
+      return true;
+    }
+
+    if (!address) return false;
+    setLoading(true);
+    const res = await finishTdRunApi(address, sign, {
+      runId: id,
+      cleared,
+      wavesReached,
+    });
+    setLoading(false);
+    if (!res) return false;
+    setProfile(res.profile);
+    if (cleared) {
+      setResultMsg(t("victoryResult", { gold: res.goldEarned }));
+    } else if (wavesReached > 0) {
+      setResultMsg(t("defeatResult", { gold: res.goldEarned }));
+    } else {
+      setResultMsg(t("forfeitResult", { gold: res.goldEarned }));
+    }
+    await refresh();
+    return true;
+  };
+
+  const handleForfeit = async (wavesReached: number) => {
+    const ok = await settleRun(false, wavesReached);
+    if (!ok && !demoMode) setError(t("forfeitFailed"));
+    setRunId(null);
+    setRun(null);
+    setScreen("hub");
+  };
   const handleStart = async () => {
     if (!profile) return;
     if (demoMode) {
@@ -241,75 +329,17 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
     setResultMsg(null);
   };
 
-  const handleForfeit = async (wavesReached: number) => {
-    if (!runId || !profile) return;
-    if (demoMode) {
-      const res = demoFinish(profile, false, wavesReached);
-      setProfile(res.profile);
-      setResultMsg(t("forfeitResult", { gold: res.goldEarned }));
-      setRunId(null);
-      setRun(null);
-      setScreen("hub");
-      setRefillCost(demoRefillCost(res.profile));
-      return;
-    }
-    if (!address) return;
-    setLoading(true);
-    const res = await finishTdRunApi(address, sign, {
-      runId,
-      cleared: false,
-      wavesReached,
-    });
-    setLoading(false);
-    if (res) {
-      setProfile(res.profile);
-      setResultMsg(t("forfeitResult", { gold: res.goldEarned }));
-    }
-    setRunId(null);
-    setRun(null);
-    setScreen("hub");
-    refresh();
-  };
-
   const endRun = useCallback(
     async (cleared: boolean, wavesReached: number) => {
-      if (!runId || !profile) return;
-      if (demoMode) {
-        const res = demoFinish(profile, cleared, wavesReached);
-        setProfile(res.profile);
-        setResultMsg(
-          cleared
-            ? t("victoryResult", { gold: res.goldEarned })
-            : t("defeatResult", { gold: res.goldEarned }),
-        );
-        setRunId(null);
-        setRun(null);
-        setScreen("hub");
-        setRefillCost(demoRefillCost(res.profile));
-        return;
-      }
-      if (!address) return;
-      setLoading(true);
-      const res = await finishTdRunApi(address, sign, {
-        runId,
-        cleared,
-        wavesReached,
-      });
-      setLoading(false);
-      if (res) {
-        setProfile(res.profile);
-        setResultMsg(
-          cleared
-            ? t("victoryResult", { gold: res.goldEarned })
-            : t("defeatResult", { gold: res.goldEarned }),
-        );
-      }
+      const ok = await settleRun(cleared, wavesReached);
+      if (!ok && !demoMode) setError(t("forfeitFailed"));
+      finishingRef.current = true;
       setRunId(null);
       setRun(null);
       setScreen("hub");
-      refresh();
     },
-    [address, runId, profile, demoMode, sign, t, refresh],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- settleRun closes over latest profile/runId
+    [address, demoMode, profile, runId, sign, t, refresh],
   );
 
   useEffect(() => {
@@ -490,7 +520,7 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
             <Stat label={t("gold")} value={profile.gold} />
             <Stat
               label={t("stamina")}
-              value={`${profile.stamina}/${STAMINA_MAX}`}
+              value={profile.stamina}
             />
             <Stat label={t("farmPoints")} value={farmPoints} />
             <Stat label={t("stage")} value={`${STAGE1_NAME}`} />
@@ -522,6 +552,7 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
           {profile.activeRunId && (
             <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4">
               <p className="text-sm text-amber-200">{t("runInProgress")}</p>
+              <p className="mt-1 text-xs text-amber-200/70">{t("runInProgressHint")}</p>
               <button
                 type="button"
                 disabled={loading}
@@ -546,16 +577,22 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
             >
               {t("startRun", { cost: STAMINA_PER_RUN })}
             </button>
-            {profile.stamina < STAMINA_MAX && refillCost != null && (
-              <button
-                type="button"
-                disabled={loading || farmPoints < refillCost}
-                onClick={handleRefill}
-                className="rounded-lg border border-white/20 px-6 py-3 text-sm disabled:opacity-40"
-              >
-                {t("refillStamina", { cost: refillCost })}
-              </button>
-            )}
+            <button
+              type="button"
+              disabled={loading || farmPoints < refillCost}
+              onClick={handleRefill}
+              className="rounded-lg border border-white/20 px-6 py-3 text-sm disabled:opacity-40"
+            >
+              {t("refillStamina", { cost: refillCost, amount: STAMINA_REFILL_AMOUNT })}
+            </button>
+            <button
+              type="button"
+              disabled={loading || farmPoints < goldExchangeCost}
+              onClick={handleExchangeGold}
+              className="rounded-lg border border-gold/30 bg-gold/10 px-6 py-3 text-sm text-gold disabled:opacity-40"
+            >
+              {t("exchangeGold", { cost: goldExchangeCost, gold: 100 })}
+            </button>
           </div>
 
           <p className="text-xs text-white/35">{t("rulesHint")}</p>

@@ -1,6 +1,7 @@
 /**
  * GET  /api/td/:wallet              — profile (gold, stamina, buffs, stage)
- * POST /api/td/:wallet/refill-stamina — points → full stamina (signed)
+ * POST /api/td/:wallet/refill-stamina — points → +30 stamina (signed)
+ * POST /api/td/:wallet/exchange-gold  — points → gold, escalating cost (signed)
  * POST /api/td/:wallet/start        — begin run, -5 stamina (signed)
  * POST /api/td/:wallet/finish       — settle run gold (signed)
  * POST /api/td/:wallet/shop-buy     — buy 24h buff (signed)
@@ -10,8 +11,12 @@ import { requireWalletSignature, type SignedBody } from "../../lib/farm-sign";
 
 const BUFF_DURATION_MS = 24 * 60 * 60 * 1000;
 const STAMINA_MAX = 30;
+const STAMINA_REFILL_AMOUNT = 30;
 const STAMINA_PER_RUN = 5;
 const REFILL_BASE_POINTS = 10;
+const GOLD_EXCHANGE_BASE_POINTS = 100;
+const GOLD_EXCHANGE_REWARD = 100;
+const RUN_STALE_MS = 2 * 60 * 60 * 1000;
 const FAIL_CONSOLATION_GOLD = 3;
 
 const SHOP: Record<string, { price: number; kind: "passive" | "active" }> = {
@@ -53,6 +58,7 @@ interface TdProfile {
   unlockedStage: number;
   buffs: Record<string, ActiveBuff>;
   refillCountToday: number;
+  goldExchangeCountToday: number;
   refillDayKey: string;
   activeRunId: string | null;
   activeRunStage: number | null;
@@ -96,6 +102,7 @@ function defaultProfile(): TdProfile {
     unlockedStage: 1,
     buffs: {},
     refillCountToday: 0,
+    goldExchangeCountToday: 0,
     refillDayKey: dayKey(),
     activeRunId: null,
     activeRunStage: null,
@@ -111,10 +118,15 @@ function purgeExpiredBuffs(profile: TdProfile, now: number): TdProfile {
   return { ...profile, buffs };
 }
 
-function resetRefillIfNewDay(profile: TdProfile, now: number): TdProfile {
+function resetDailyCounters(profile: TdProfile, now: number): TdProfile {
   const dk = dayKey(now);
   if (profile.refillDayKey === dk) return profile;
-  return { ...profile, refillDayKey: dk, refillCountToday: 0 };
+  return {
+    ...profile,
+    refillDayKey: dk,
+    refillCountToday: 0,
+    goldExchangeCountToday: 0,
+  };
 }
 
 async function loadFarm(env: Env, wallet: string): Promise<FarmState> {
@@ -151,15 +163,40 @@ async function loadTd(env: Env, wallet: string): Promise<TdProfile> {
     profile = memoryTd.get(wallet) ?? defaultProfile();
   }
   const now = Date.now();
-  profile = resetRefillIfNewDay(profile, now);
+  if (typeof profile.goldExchangeCountToday !== "number") {
+    profile = { ...profile, goldExchangeCountToday: 0 };
+  }
+  profile = resetDailyCounters(profile, now);
   profile = purgeExpiredBuffs(profile, now);
   return profile;
+}
+
+async function reconcileActiveRun(
+  env: Env,
+  profile: TdProfile,
+  now: number,
+): Promise<TdProfile> {
+  if (!profile.activeRunId) return profile;
+
+  const run = await loadRun(env, profile.activeRunId);
+  const startedAt = profile.activeRunStartedAt ?? run?.startedAt ?? 0;
+  const stale = !run || now - startedAt > RUN_STALE_MS;
+
+  if (!stale) return profile;
+
+  if (run) await deleteRun(env, profile.activeRunId);
+  return {
+    ...profile,
+    activeRunId: null,
+    activeRunStage: null,
+    activeRunStartedAt: null,
+  };
 }
 
 async function saveTd(env: Env, wallet: string, profile: TdProfile) {
   const key = `td:${wallet}`;
   const now = Date.now();
-  const cleaned = purgeExpiredBuffs(resetRefillIfNewDay(profile, now), now);
+  const cleaned = purgeExpiredBuffs(resetDailyCounters(profile, now), now);
   if (env.SWAP_KV) {
     await env.SWAP_KV.put(key, JSON.stringify(cleaned));
   } else {
@@ -198,6 +235,10 @@ function refillCost(profile: TdProfile): number {
   return REFILL_BASE_POINTS * 2 ** profile.refillCountToday;
 }
 
+function goldExchangeCost(profile: TdProfile): number {
+  return GOLD_EXCHANGE_BASE_POINTS * 2 ** profile.goldExchangeCountToday;
+}
+
 function pathSegments(raw: string | string[] | undefined): string[] {
   if (!raw) return [];
   if (Array.isArray(raw)) return raw;
@@ -223,14 +264,17 @@ export const onRequest = async (context: {
   if (!wallet) return new Response("Bad wallet", { status: 400 });
 
   if (path.length === 1 && request.method === "GET") {
-    const profile = await loadTd(env, wallet);
+    const now = Date.now();
+    let profile = await loadTd(env, wallet);
+    profile = await reconcileActiveRun(env, profile, now);
     const farm = await loadFarm(env, wallet);
     const saved = await saveTd(env, wallet, profile);
     return json({
       ok: true,
       profile: saved,
       farmPoints: farm.points,
-      refillCost: saved.stamina >= STAMINA_MAX ? null : refillCost(saved),
+      refillCost: refillCost(saved),
+      goldExchangeCost: goldExchangeCost(saved),
     });
   }
 
@@ -241,10 +285,6 @@ export const onRequest = async (context: {
     if (auth) return auth;
 
     let profile = await loadTd(env, wallet);
-    if (profile.stamina >= STAMINA_MAX) {
-      return json({ ok: false, error: "STAMINA_FULL" }, 400);
-    }
-
     const cost = refillCost(profile);
     const farm = await loadFarm(env, wallet);
     if (farm.points < cost) {
@@ -254,7 +294,7 @@ export const onRequest = async (context: {
     await saveFarmPoints(env, wallet, farm.points - cost);
     profile = {
       ...profile,
-      stamina: STAMINA_MAX,
+      stamina: profile.stamina + STAMINA_REFILL_AMOUNT,
       refillCountToday: profile.refillCountToday + 1,
     };
     const saved = await saveTd(env, wallet, profile);
@@ -263,6 +303,36 @@ export const onRequest = async (context: {
       profile: saved,
       pointsSpent: cost,
       farmPoints: farm.points - cost,
+      staminaGained: STAMINA_REFILL_AMOUNT,
+    });
+  }
+
+  if (path[1] === "exchange-gold" && request.method === "POST") {
+    const body = await parseJson<SignedBody>(request);
+    if (!body) return new Response("Bad JSON", { status: 400 });
+    const auth = await requireWalletSignature("td-exchange-gold", wallet, body);
+    if (auth) return auth;
+
+    let profile = await loadTd(env, wallet);
+    const cost = goldExchangeCost(profile);
+    const farm = await loadFarm(env, wallet);
+    if (farm.points < cost) {
+      return json({ ok: false, error: "INSUFFICIENT_POINTS", need: cost, have: farm.points }, 400);
+    }
+
+    await saveFarmPoints(env, wallet, farm.points - cost);
+    profile = {
+      ...profile,
+      gold: profile.gold + GOLD_EXCHANGE_REWARD,
+      goldExchangeCountToday: profile.goldExchangeCountToday + 1,
+    };
+    const saved = await saveTd(env, wallet, profile);
+    return json({
+      ok: true,
+      profile: saved,
+      pointsSpent: cost,
+      farmPoints: farm.points - cost,
+      goldGained: GOLD_EXCHANGE_REWARD,
     });
   }
 
