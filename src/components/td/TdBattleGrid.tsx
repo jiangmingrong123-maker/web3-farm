@@ -77,6 +77,13 @@ export function TdBattleGrid({
   const [hoverCell, setHoverCell] = useState<[number, number] | null>(null);
   const [dragTowerId, setDragTowerId] = useState<string | null>(null);
   const [dropCell, setDropCell] = useState<[number, number] | null>(null);
+  const pointerDragRef = useRef<{
+    towerId: string;
+    originX: number;
+    originY: number;
+    moved: boolean;
+  } | null>(null);
+  const suppressClickRef = useRef(false);
   const [projectiles, setProjectiles] = useState<ProjectileFx[]>([]);
   const [hits, setHits] = useState<HitFlashFx[]>([]);
   const [deaths, setDeaths] = useState<DeathFx[]>([]);
@@ -129,6 +136,29 @@ export function TdBattleGrid({
   const mergeSource = mergeSourceId
     ? run.towers.find((tw) => tw.id === mergeSourceId)
     : null;
+
+  function cellFromPoint(clientX: number, clientY: number): [number, number] | null {
+    const el = document.elementFromPoint(clientX, clientY)?.closest("[data-td-cell]");
+    if (!el || !(el instanceof HTMLElement)) return null;
+    const x = Number(el.dataset.tdX);
+    const y = Number(el.dataset.tdY);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    return [x, y];
+  }
+
+  function endPointerDrag(
+    towerId: string,
+    moved: boolean,
+    target: [number, number] | null,
+  ) {
+    pointerDragRef.current = null;
+    setDragTowerId(null);
+    setDropCell(null);
+    if (moved && target) {
+      suppressClickRef.current = true;
+      onTowerDrop(towerId, target[0], target[1]);
+    }
+  }
 
   return (
     <div className="space-y-3">
@@ -188,6 +218,9 @@ export function TdBattleGrid({
               return (
                 <div
                   key={`${x}-${y}`}
+                  data-td-cell
+                  data-td-x={x}
+                  data-td-y={y}
                   role="button"
                   tabIndex={slotActive ? 0 : -1}
                   onKeyDown={(e) => {
@@ -260,7 +293,7 @@ export function TdBattleGrid({
                   {tower && (
                     <div
                       draggable={!paused}
-                      className="absolute inset-0 z-10 cursor-grab active:cursor-grabbing"
+                      className="absolute inset-0 z-10 touch-none cursor-grab active:cursor-grabbing"
                       onDragStart={(e) => {
                         e.stopPropagation();
                         e.dataTransfer.setData("text/plain", tower.id);
@@ -272,8 +305,55 @@ export function TdBattleGrid({
                         setDragTowerId(null);
                         setDropCell(null);
                       }}
+                      onPointerDown={(e) => {
+                        if (paused || e.button !== 0) return;
+                        e.stopPropagation();
+                        e.currentTarget.setPointerCapture(e.pointerId);
+                        pointerDragRef.current = {
+                          towerId: tower.id,
+                          originX: tower.x,
+                          originY: tower.y,
+                          moved: false,
+                        };
+                        setDragTowerId(tower.id);
+                        onTowerDragStart?.();
+                      }}
+                      onPointerMove={(e) => {
+                        const drag = pointerDragRef.current;
+                        if (!drag || drag.towerId !== tower.id) return;
+                        const cell = cellFromPoint(e.clientX, e.clientY);
+                        if (!cell) return;
+                        setDropCell(cell);
+                        if (cell[0] !== drag.originX || cell[1] !== drag.originY) {
+                          drag.moved = true;
+                        }
+                      }}
+                      onPointerUp={(e) => {
+                        const drag = pointerDragRef.current;
+                        if (!drag || drag.towerId !== tower.id) return;
+                        e.stopPropagation();
+                        if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+                          e.currentTarget.releasePointerCapture(e.pointerId);
+                        }
+                        const cell = cellFromPoint(e.clientX, e.clientY) ?? dropCell;
+                        endPointerDrag(drag.towerId, drag.moved, cell);
+                      }}
+                      onPointerCancel={(e) => {
+                        const drag = pointerDragRef.current;
+                        if (!drag || drag.towerId !== tower.id) return;
+                        if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+                          e.currentTarget.releasePointerCapture(e.pointerId);
+                        }
+                        pointerDragRef.current = null;
+                        setDragTowerId(null);
+                        setDropCell(null);
+                      }}
                       onClick={(e) => {
                         e.stopPropagation();
+                        if (suppressClickRef.current) {
+                          suppressClickRef.current = false;
+                          return;
+                        }
                         onTowerClick(tower.id);
                       }}
                     >
@@ -390,7 +470,7 @@ export function TdBattleGrid({
         {mergeSourceId
           ? t("mergeSelectTarget")
           : dragTowerId
-            ? t("dragHint")
+            ? t("touchDragHint")
             : !canAfford
             ? t("needPopularity", { cost: mobDef.cost, have: Math.floor(run.popularity) })
             : t("buildHint", { mob: mobDef.label, cost: mobDef.cost, range: mobDef.range })}

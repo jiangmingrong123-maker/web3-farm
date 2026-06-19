@@ -43,6 +43,7 @@ import {
   isTdDevDemoEnabled,
 } from "@/lib/td/demo-store";
 import { TdBattleGrid } from "@/components/td/TdBattleGrid";
+import { TdMergeBar } from "@/components/td/TdMergeBar";
 import { TdTowerPicker } from "@/components/td/TdTowerPicker";
 import {
   playTdSfx,
@@ -374,6 +375,7 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
         setInspectedTowerId(towerId);
         return;
       }
+      setMergeSourceId(null);
     }
 
     if (mergeSourceId === towerId) {
@@ -394,6 +396,16 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
       playTdSfx(result.action === "merge" ? "build" : "ui");
       updateRun(result.state);
     }
+  };
+
+  const handleMergeWith = (sourceId: string, targetId: string) => {
+    if (!run || paused) return;
+    const merged = mergeCrewTowers(run, sourceId, targetId);
+    if (!merged) return;
+    playTdSfx("build");
+    updateRun(merged);
+    setMergeSourceId(null);
+    setInspectedTowerId(targetId);
   };
 
   const handleBeginBattle = () => {
@@ -632,7 +644,7 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
       )}
 
       {screen === "play" && run && (
-        <div className="space-y-4">
+        <div className="space-y-4 pb-28 sm:pb-0">
           <div className="flex flex-wrap items-center gap-4 text-sm">
             <span>{t("wave")}: {run.wave}/20</span>
             <span>{t("hearts")}: {"❤".repeat(run.hearts)}{"🖤".repeat(3 - run.hearts)}</span>
@@ -718,6 +730,19 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
               <span className="self-center text-xs text-amber-300/80">{t("pausedHint")}</span>
             )}
           </div>
+
+          <TdMergeBar
+            inspectedTower={run.towers.find((tw) => tw.id === inspectedTowerId) ?? null}
+            mergeSourceId={mergeSourceId}
+            allTowers={run.towers}
+            paused={paused}
+            onMergeSelect={(id) => {
+              playTdSfx("ui");
+              setMergeSourceId(id);
+            }}
+            onMergeCancel={() => setMergeSourceId(null)}
+            onMergeWith={handleMergeWith}
+          />
         </div>
       )}
 
