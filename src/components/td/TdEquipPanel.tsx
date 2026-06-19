@@ -1,7 +1,8 @@
 "use client";
 
+import type { CSSProperties } from "react";
 import { useTranslations } from "next-intl";
-import { TdHeroPortrait } from "@/components/td/TdHeroPortrait";
+import { TdHeroHead } from "@/components/td/TdHeroPortrait";
 import {
   equipBonus,
   equipDisplayName,
@@ -13,13 +14,14 @@ import {
 import type { HeroAvatar } from "@/lib/td/hero-avatar";
 import { upgradeCost, type UpgradeKind } from "@/lib/td/rpg-storage";
 
-const SLOT_POS: { slot: EquipSlot; className: string }[] = [
-  { slot: "hat", className: "top-0 left-1/2 -translate-x-1/2" },
-  { slot: "weapon", className: "top-[68px] right-0" },
-  { slot: "bracelet", className: "top-[136px] left-0" },
-  { slot: "ring", className: "top-[136px] right-0" },
-  { slot: "clothes", className: "bottom-[52px] left-1/2 -translate-x-1/2" },
-  { slot: "pants", className: "bottom-0 left-1/2 -translate-x-1/2" },
+/** 红月式人体装备位 — 百分比定位在 200×260 面板上 */
+const SLOT_POS: { slot: EquipSlot; style: CSSProperties }[] = [
+  { slot: "hat", style: { top: "2%", left: "50%", transform: "translateX(-50%)" } },
+  { slot: "ring", style: { top: "34%", left: "2%" } },
+  { slot: "bracelet", style: { top: "52%", left: "2%" } },
+  { slot: "weapon", style: { top: "36%", right: "2%" } },
+  { slot: "clothes", style: { top: "42%", left: "50%", transform: "translateX(-50%)" } },
+  { slot: "pants", style: { top: "62%", left: "50%", transform: "translateX(-50%)" } },
 ];
 
 type Props = {
@@ -40,17 +42,29 @@ export function TdEquipPanel({ save, gold, locale, avatar, onUpgrade }: Props) {
       <h2 className="mb-1 text-sm font-bold text-gold">{t("heroTitle")}</h2>
       <p className="mb-3 text-xs text-white/45">{t("heroHint")}</p>
 
-      <div className="mx-auto max-w-md space-y-4">
-        <div className="relative mx-auto h-[340px] w-[280px] rounded-xl border border-emerald-800/50 bg-gradient-to-b from-emerald-950/50 via-emerald-950/20 to-black/60 p-2 shadow-[inset_0_0_40px_rgba(16,80,60,0.25)]">
-          <div className="absolute left-1/2 top-[44px] z-0 h-[230px] w-[150px] -translate-x-1/2">
-            <TdHeroPortrait avatar={avatar} level={save.level} />
+      <div className="mx-auto max-w-xs space-y-3">
+        <div className="relative mx-auto h-[260px] w-[200px] rounded-lg border border-emerald-800/60 bg-gradient-to-b from-emerald-950/60 to-black/70 shadow-[inset_0_0_30px_rgba(16,70,50,0.3)]">
+          {/* 人体剪影 */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/td/hero-body.svg"
+            alt=""
+            className="pointer-events-none absolute inset-x-4 bottom-3 top-6 h-[calc(100%-2rem)] w-[calc(100%-2rem)] object-contain opacity-90"
+          />
+
+          {/* 头部：Nobody 头像 */}
+          <div
+            className="absolute z-[5]"
+            style={{ top: "14%", left: "50%", transform: "translateX(-50%)" }}
+          >
+            <TdHeroHead avatar={avatar} level={save.level} />
           </div>
 
-          {SLOT_POS.map(({ slot, className }) => (
+          {SLOT_POS.map(({ slot, style }) => (
             <EquipSlotBox
               key={slot}
               slot={slot}
-              className={`absolute z-10 w-[78px] ${className}`}
+              style={style}
               save={save}
               gold={gold}
               cap={equipCap}
@@ -60,15 +74,15 @@ export function TdEquipPanel({ save, gold, locale, avatar, onUpgrade }: Props) {
           ))}
         </div>
 
-        <div className="grid grid-cols-3 gap-2 text-sm sm:grid-cols-5">
+        <div className="grid grid-cols-5 gap-1.5 text-center text-xs">
           <StatChip label="HP" value={stats.maxHp} />
           <StatChip label={t("statAtkShort")} value={stats.atk} />
           <StatChip label={t("statDefShort")} value={stats.def} />
           <StatChip label={t("statCrit")} value={`${stats.crit}%`} />
           <StatChip label={t("statAtkSpd")} value={`${stats.atkSpd}%`} />
         </div>
-        <p className="text-center text-[11px] text-white/35">
-          {t("equipCapHint", { cap: equipCap })}
+        <p className="text-center text-[10px] text-white/35">
+          {t("equipHoverHint")} · {t("equipCapHint", { cap: equipCap })}
         </p>
       </div>
     </section>
@@ -77,9 +91,9 @@ export function TdEquipPanel({ save, gold, locale, avatar, onUpgrade }: Props) {
 
 function StatChip({ label, value }: { label: string; value: string | number }) {
   return (
-    <div className="rounded border border-white/10 bg-black/20 px-2 py-1.5 text-center">
-      <span className="text-[10px] text-white/40">{label}</span>
-      <p className="font-semibold text-white/90">{value}</p>
+    <div className="rounded border border-white/10 bg-black/25 px-1 py-1">
+      <span className="block text-[9px] text-white/40">{label}</span>
+      <span className="font-semibold text-white/85">{value}</span>
     </div>
   );
 }
@@ -90,7 +104,7 @@ function EquipSlotBox({
   gold,
   cap,
   locale,
-  className,
+  style,
   onUpgrade,
 }: {
   slot: EquipSlot;
@@ -98,7 +112,7 @@ function EquipSlotBox({
   gold: number;
   cap: number;
   locale: string;
-  className: string;
+  style: CSSProperties;
   onUpgrade: (kind: UpgradeKind) => void;
 }) {
   const t = useTranslations("td");
@@ -108,43 +122,52 @@ function EquipSlotBox({
   const cost = upgradeCost(save, { type: "equip", slot });
   const atCap = tier >= cap;
 
-  const bonusLine = [
-    bonus.atk ? `+${bonus.atk}${t("statAtkShort")}` : "",
-    bonus.def ? `+${bonus.def}${t("statDefShort")}` : "",
-    bonus.hp ? `+${bonus.hp}HP` : "",
-    bonus.crit ? `+${bonus.crit}%${t("statCritShort")}` : "",
-    bonus.atkSpd ? `+${bonus.atkSpd}%${t("statAtkSpdShort")}` : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
+  const bonusLines = [
+    bonus.atk ? `+${bonus.atk} ${t("statAtkShort")}` : "",
+    bonus.def ? `+${bonus.def} ${t("statDefShort")}` : "",
+    bonus.hp ? `+${bonus.hp} HP` : "",
+    bonus.crit ? `+${bonus.crit}% ${t("statCrit")}` : "",
+    bonus.atkSpd ? `+${bonus.atkSpd}% ${t("statAtkSpd")}` : "",
+  ].filter(Boolean);
+
+  const slotLabel = t(`equip_${slot}`);
 
   return (
-    <div
-      className={`flex flex-col rounded-md border border-stone-600/80 bg-stone-900/90 p-1.5 shadow-md ${className}`}
-      title={`${name}\n${bonusLine}`}
-    >
-      <span className="text-center text-[8px] uppercase tracking-wider text-emerald-400/70">
-        {t(`equip_${slot}`)}
-      </span>
-      <span className="mt-0.5 line-clamp-2 min-h-[26px] text-center text-[9px] font-medium leading-tight text-stone-100">
-        {name}
-      </span>
-      <span className="text-center text-[8px] font-bold text-gold">T{tier}</span>
-      {bonusLine && (
-        <span className="mt-0.5 line-clamp-2 text-center text-[7px] leading-tight text-white/45">
-          {bonusLine}
+    <div className="group absolute z-10" style={style}>
+      <div
+        className="flex h-11 w-11 cursor-default flex-col items-center justify-center rounded border border-stone-600/90 bg-stone-900/95 shadow-md transition-colors hover:border-gold/50 hover:bg-stone-800"
+        aria-label={name}
+      >
+        <span className="text-[7px] uppercase leading-none text-emerald-500/80">
+          {slotLabel.slice(0, 2)}
         </span>
-      )}
-      {cost != null && (
-        <button
-          type="button"
-          disabled={gold < cost}
-          onClick={() => onUpgrade({ type: "equip", slot })}
-          className="mt-1 rounded border border-gold/25 bg-gold/10 py-0.5 text-[8px] text-gold disabled:opacity-40"
-        >
-          {atCap ? "↑Lv" : `${cost}G`}
-        </button>
-      )}
+        <span className="mt-0.5 text-[10px] font-bold leading-none text-gold">
+          T{tier}
+        </span>
+      </div>
+
+      {/* 悬停详情 */}
+      <div className="pointer-events-none absolute bottom-full left-1/2 z-30 mb-1.5 hidden w-[148px] -translate-x-1/2 rounded-md border border-stone-600 bg-stone-950/98 p-2 text-left shadow-xl group-hover:pointer-events-auto group-hover:block">
+        <p className="text-[10px] font-medium text-stone-100">{name}</p>
+        <p className="text-[9px] text-emerald-400/80">{slotLabel}</p>
+        {bonusLines.length > 0 && (
+          <ul className="mt-1 space-y-0.5 text-[9px] text-white/55">
+            {bonusLines.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        )}
+        {cost != null && (
+          <button
+            type="button"
+            disabled={gold < cost}
+            onClick={() => onUpgrade({ type: "equip", slot })}
+            className="mt-1.5 w-full rounded border border-gold/30 bg-gold/10 py-0.5 text-[9px] text-gold disabled:opacity-40"
+          >
+            {atCap ? t("equipNeedHeroLv") : `${t("upgrade")} · ${cost}G`}
+          </button>
+        )}
+      </div>
     </div>
   );
 }
