@@ -31,6 +31,12 @@ export function Header() {
             {t("farm")}
           </Link>
           <Link
+            href="/td"
+            className={pathname === "/td" ? "text-white" : "hover:text-white/90"}
+          >
+            {t("td")}
+          </Link>
+          <Link
             href="/swap"
             className={pathname === "/swap" ? "text-white" : "hover:text-white/90"}
           >

@@ -1,0 +1,384 @@
+/**
+ * GET  /api/td/:wallet              — profile (gold, stamina, buffs, stage)
+ * POST /api/td/:wallet/refill-stamina — points → full stamina (signed)
+ * POST /api/td/:wallet/start        — begin run, -5 stamina (signed)
+ * POST /api/td/:wallet/finish       — settle run gold (signed)
+ * POST /api/td/:wallet/shop-buy     — buy 24h buff (signed)
+ */
+
+import { requireWalletSignature, type SignedBody } from "../../lib/farm-sign";
+
+const BUFF_DURATION_MS = 24 * 60 * 60 * 1000;
+const STAMINA_MAX = 30;
+const STAMINA_PER_RUN = 5;
+const REFILL_BASE_POINTS = 10;
+const FAIL_CONSOLATION_GOLD = 3;
+
+const SHOP: Record<string, { price: number; kind: "passive" | "active" }> = {
+  notice: { price: 25, kind: "passive" },
+  hot: { price: 40, kind: "passive" },
+  promo: { price: 50, kind: "passive" },
+  fan: { price: 35, kind: "passive" },
+  shield: { price: 45, kind: "passive" },
+  pack: { price: 60, kind: "passive" },
+  buy_hype: { price: 15, kind: "active" },
+  freeze: { price: 25, kind: "active" },
+  nerf: { price: 30, kind: "active" },
+};
+
+function stageClearGold(stage: number): number {
+  return Math.min(30 + (stage - 1) * 15, 120);
+}
+
+interface Env {
+  SWAP_KV?: {
+    get(key: string): Promise<string | null>;
+    put(key: string, value: string): Promise<void>;
+  };
+}
+
+interface FarmState {
+  points: number;
+}
+
+interface ActiveBuff {
+  purchasedAt: number;
+  expiresAt: number;
+  usesLeft?: number;
+}
+
+interface TdProfile {
+  gold: number;
+  stamina: number;
+  unlockedStage: number;
+  buffs: Record<string, ActiveBuff>;
+  refillCountToday: number;
+  refillDayKey: string;
+  activeRunId: string | null;
+  activeRunStage: number | null;
+  activeRunStartedAt: number | null;
+}
+
+interface ActiveRun {
+  runId: string;
+  wallet: string;
+  stage: number;
+  startedAt: number;
+}
+
+const NO_CACHE = {
+  "Content-Type": "application/json",
+  "Cache-Control": "no-store, no-cache, must-revalidate",
+};
+
+const memoryTd = new Map<string, TdProfile>();
+const memoryRuns = new Map<string, ActiveRun>();
+const memoryFarm = new Map<string, FarmState>();
+
+function json(data: unknown, status = 200) {
+  return new Response(JSON.stringify(data), { status, headers: NO_CACHE });
+}
+
+function normalizeWallet(w: string): string | null {
+  const x = w.trim().toLowerCase();
+  if (!/^0x[a-f0-9]{40}$/.test(x)) return null;
+  return x;
+}
+
+function dayKey(now = Date.now()): string {
+  return new Date(now).toISOString().slice(0, 10);
+}
+
+function defaultProfile(): TdProfile {
+  return {
+    gold: 0,
+    stamina: STAMINA_MAX,
+    unlockedStage: 1,
+    buffs: {},
+    refillCountToday: 0,
+    refillDayKey: dayKey(),
+    activeRunId: null,
+    activeRunStage: null,
+    activeRunStartedAt: null,
+  };
+}
+
+function purgeExpiredBuffs(profile: TdProfile, now: number): TdProfile {
+  const buffs: Record<string, ActiveBuff> = {};
+  for (const [id, b] of Object.entries(profile.buffs)) {
+    if (b.expiresAt > now) buffs[id] = b;
+  }
+  return { ...profile, buffs };
+}
+
+function resetRefillIfNewDay(profile: TdProfile, now: number): TdProfile {
+  const dk = dayKey(now);
+  if (profile.refillDayKey === dk) return profile;
+  return { ...profile, refillDayKey: dk, refillCountToday: 0 };
+}
+
+async function loadFarm(env: Env, wallet: string): Promise<FarmState> {
+  const key = `farm:${wallet}`;
+  if (env.SWAP_KV) {
+    const raw = await env.SWAP_KV.get(key);
+    if (raw) {
+      const p = JSON.parse(raw) as { points?: number };
+      return { points: Math.max(0, Number(p.points) || 0) };
+    }
+    return { points: 0 };
+  }
+  return memoryFarm.get(wallet) ?? { points: 0 };
+}
+
+async function saveFarmPoints(env: Env, wallet: string, points: number) {
+  const key = `farm:${wallet}`;
+  if (env.SWAP_KV) {
+    const raw = await env.SWAP_KV.get(key);
+    const base = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+    await env.SWAP_KV.put(key, JSON.stringify({ ...base, points: Math.max(0, points) }));
+  } else {
+    memoryFarm.set(wallet, { points: Math.max(0, points) });
+  }
+}
+
+async function loadTd(env: Env, wallet: string): Promise<TdProfile> {
+  const key = `td:${wallet}`;
+  let profile: TdProfile;
+  if (env.SWAP_KV) {
+    const raw = await env.SWAP_KV.get(key);
+    profile = raw ? (JSON.parse(raw) as TdProfile) : defaultProfile();
+  } else {
+    profile = memoryTd.get(wallet) ?? defaultProfile();
+  }
+  const now = Date.now();
+  profile = resetRefillIfNewDay(profile, now);
+  profile = purgeExpiredBuffs(profile, now);
+  return profile;
+}
+
+async function saveTd(env: Env, wallet: string, profile: TdProfile) {
+  const key = `td:${wallet}`;
+  const now = Date.now();
+  const cleaned = purgeExpiredBuffs(resetRefillIfNewDay(profile, now), now);
+  if (env.SWAP_KV) {
+    await env.SWAP_KV.put(key, JSON.stringify(cleaned));
+  } else {
+    memoryTd.set(wallet, cleaned);
+  }
+  return cleaned;
+}
+
+async function loadRun(env: Env, runId: string): Promise<ActiveRun | null> {
+  const key = `td_run:${runId}`;
+  if (env.SWAP_KV) {
+    const raw = await env.SWAP_KV.get(key);
+    return raw ? (JSON.parse(raw) as ActiveRun) : null;
+  }
+  return memoryRuns.get(runId) ?? null;
+}
+
+async function saveRun(env: Env, run: ActiveRun) {
+  const key = `td_run:${run.runId}`;
+  if (env.SWAP_KV) {
+    await env.SWAP_KV.put(key, JSON.stringify(run));
+  } else {
+    memoryRuns.set(run.runId, run);
+  }
+}
+
+async function deleteRun(env: Env, runId: string) {
+  if (env.SWAP_KV) {
+    await env.SWAP_KV.put(`td_run:${runId}`, "");
+  } else {
+    memoryRuns.delete(runId);
+  }
+}
+
+function refillCost(profile: TdProfile): number {
+  return REFILL_BASE_POINTS * 2 ** profile.refillCountToday;
+}
+
+function pathSegments(raw: string | string[] | undefined): string[] {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw;
+  return raw.split("/").filter(Boolean);
+}
+
+async function parseJson<T>(request: Request): Promise<T | null> {
+  try {
+    return (await request.json()) as T;
+  } catch {
+    return null;
+  }
+}
+
+export const onRequest = async (context: {
+  request: Request;
+  env: Env;
+  params: Record<string, string | string[] | undefined>;
+}) => {
+  const { request, env, params } = context;
+  const path = pathSegments(params.path as string | string[] | undefined);
+  const wallet = path[0] ? normalizeWallet(path[0]) : null;
+  if (!wallet) return new Response("Bad wallet", { status: 400 });
+
+  if (path.length === 1 && request.method === "GET") {
+    const profile = await loadTd(env, wallet);
+    const farm = await loadFarm(env, wallet);
+    const saved = await saveTd(env, wallet, profile);
+    return json({
+      ok: true,
+      profile: saved,
+      farmPoints: farm.points,
+      refillCost: saved.stamina >= STAMINA_MAX ? null : refillCost(saved),
+    });
+  }
+
+  if (path[1] === "refill-stamina" && request.method === "POST") {
+    const body = await parseJson<SignedBody>(request);
+    if (!body) return new Response("Bad JSON", { status: 400 });
+    const auth = await requireWalletSignature("td-refill-stamina", wallet, body);
+    if (auth) return auth;
+
+    let profile = await loadTd(env, wallet);
+    if (profile.stamina >= STAMINA_MAX) {
+      return json({ ok: false, error: "STAMINA_FULL" }, 400);
+    }
+
+    const cost = refillCost(profile);
+    const farm = await loadFarm(env, wallet);
+    if (farm.points < cost) {
+      return json({ ok: false, error: "INSUFFICIENT_POINTS", need: cost, have: farm.points }, 400);
+    }
+
+    await saveFarmPoints(env, wallet, farm.points - cost);
+    profile = {
+      ...profile,
+      stamina: STAMINA_MAX,
+      refillCountToday: profile.refillCountToday + 1,
+    };
+    const saved = await saveTd(env, wallet, profile);
+    return json({
+      ok: true,
+      profile: saved,
+      pointsSpent: cost,
+      farmPoints: farm.points - cost,
+    });
+  }
+
+  if (path[1] === "start" && request.method === "POST") {
+    const body = await parseJson<SignedBody & { stage?: number }>(request);
+    if (!body) return new Response("Bad JSON", { status: 400 });
+    const stage = Number(body.stage) || 1;
+    const auth = await requireWalletSignature("td-start", wallet, body, `stage=${stage}`);
+    if (auth) return auth;
+
+    let profile = await loadTd(env, wallet);
+    if (profile.stamina < STAMINA_PER_RUN) {
+      return json({ ok: false, error: "NO_STAMINA", need: STAMINA_PER_RUN, have: profile.stamina }, 400);
+    }
+    if (stage > profile.unlockedStage) {
+      return json({ ok: false, error: "STAGE_LOCKED", unlocked: profile.unlockedStage }, 400);
+    }
+    if (profile.activeRunId) {
+      return json({ ok: false, error: "RUN_ACTIVE" }, 400);
+    }
+
+    const runId = `${wallet.slice(2, 10)}_${Date.now().toString(36)}`;
+    const now = Date.now();
+    await saveRun(env, { runId, wallet, stage, startedAt: now });
+
+    profile = {
+      ...profile,
+      stamina: profile.stamina - STAMINA_PER_RUN,
+      activeRunId: runId,
+      activeRunStage: stage,
+      activeRunStartedAt: now,
+    };
+    const saved = await saveTd(env, wallet, profile);
+    return json({ ok: true, profile: saved, runId, activeBuffs: saved.buffs });
+  }
+
+  if (path[1] === "finish" && request.method === "POST") {
+    const body = await parseJson<
+      SignedBody & { runId?: string; cleared?: boolean; wavesReached?: number }
+    >(request);
+    if (!body) return new Response("Bad JSON", { status: 400 });
+    const runId = (body.runId ?? "").trim();
+    const cleared = !!body.cleared;
+    const wavesReached = Math.max(0, Math.min(20, Number(body.wavesReached) || 0));
+    const auth = await requireWalletSignature(
+      "td-finish",
+      wallet,
+      body,
+      `runId=${runId}:cleared=${cleared ? 1 : 0}`,
+    );
+    if (auth) return auth;
+
+    const run = await loadRun(env, runId);
+    if (!run || run.wallet !== wallet) {
+      return json({ ok: false, error: "INVALID_RUN" }, 400);
+    }
+
+    let profile = await loadTd(env, wallet);
+    if (profile.activeRunId !== runId) {
+      return json({ ok: false, error: "RUN_MISMATCH" }, 400);
+    }
+
+    let goldEarned = 0;
+    if (cleared) {
+      goldEarned = stageClearGold(run.stage);
+      if (run.stage >= profile.unlockedStage) {
+        profile.unlockedStage = Math.min(run.stage + 1, 99);
+      }
+    } else if (wavesReached > 0) {
+      goldEarned = FAIL_CONSOLATION_GOLD;
+    }
+
+    profile = {
+      ...profile,
+      gold: profile.gold + goldEarned,
+      activeRunId: null,
+      activeRunStage: null,
+      activeRunStartedAt: null,
+    };
+    const saved = await saveTd(env, wallet, profile);
+    await deleteRun(env, runId);
+
+    return json({ ok: true, profile: saved, goldEarned, cleared });
+  }
+
+  if (path[1] === "shop-buy" && request.method === "POST") {
+    const body = await parseJson<SignedBody & { itemId?: string }>(request);
+    if (!body) return new Response("Bad JSON", { status: 400 });
+    const itemId = (body.itemId ?? "").trim();
+    const item = SHOP[itemId];
+    if (!item) return json({ ok: false, error: "UNKNOWN_ITEM" }, 400);
+
+    const auth = await requireWalletSignature("td-shop-buy", wallet, body, `itemId=${itemId}`);
+    if (auth) return auth;
+
+    let profile = await loadTd(env, wallet);
+    if (profile.gold < item.price) {
+      return json({ ok: false, error: "INSUFFICIENT_GOLD", need: item.price, have: profile.gold }, 400);
+    }
+
+    const now = Date.now();
+    profile = {
+      ...profile,
+      gold: profile.gold - item.price,
+      buffs: {
+        ...profile.buffs,
+        [itemId]: {
+          purchasedAt: now,
+          expiresAt: now + BUFF_DURATION_MS,
+          usesLeft: item.kind === "active" ? 1 : undefined,
+        },
+      },
+    };
+    const saved = await saveTd(env, wallet, profile);
+    return json({ ok: true, profile: saved, itemId });
+  }
+
+  return new Response("Not found", { status: 404 });
+};

@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>小人物塔防 · 游戏数据手册 v0.1</title>
+  <style>
+    @page { margin: 18mm 16mm; size: A4; }
+    * { box-sizing: border-box; }
+    body {
+      font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", sans-serif;
+      font-size: 11pt;
+      line-height: 1.55;
+      color: #1a1a1a;
+      max-width: 210mm;
+      margin: 0 auto;
+      padding: 12mm;
+    }
+    h1 { font-size: 22pt; color: #8b6914; border-bottom: 3px solid #c9a227; padding-bottom: 8px; }
+    h2 { font-size: 14pt; color: #5c4a12; margin-top: 22px; border-left: 4px solid #c9a227; padding-left: 10px; }
+    h3 { font-size: 12pt; color: #333; margin-top: 14px; }
+    .meta { color: #666; font-size: 10pt; margin-bottom: 20px; }
+    table { width: 100%; border-collapse: collapse; margin: 10px 0 16px; font-size: 10pt; }
+    th, td { border: 1px solid #ccc; padding: 6px 8px; text-align: left; }
+    th { background: #f5f0e0; font-weight: 600; }
+    tr:nth-child(even) td { background: #fafafa; }
+    .ok { color: #0a7; font-weight: 600; }
+    .no { color: #c33; font-weight: 600; }
+    .note { background: #fff8e6; border: 1px solid #e6d49a; padding: 10px 12px; border-radius: 6px; font-size: 10pt; margin: 12px 0; }
+    .footer { margin-top: 30px; font-size: 9pt; color: #888; text-align: center; border-top: 1px solid #ddd; padding-top: 10px; }
+    code { background: #f0f0f0; padding: 1px 4px; border-radius: 3px; font-size: 9.5pt; }
+    ul { margin: 6px 0; padding-left: 20px; }
+  </style>
+</head>
+<body>
+
+<h1>小人物塔防 · 游戏数据手册</h1>
+<p class="meta">
+  项目：web3-farm &nbsp;|&nbsp; 版本：M1 Stage 1 &nbsp;|&nbsp; 文档日期：2026-06-07<br>
+  主题：Nobody NFT · 化妆间 → 摄影棚 → 红毯 → 首映<br>
+  线上地址：<strong>https://web3-farm.pages.dev/zh/td/</strong>
+</p>
+
+<h2>一、资源与经济</h2>
+<table>
+  <tr><th>资源</th><th>规则</th></tr>
+  <tr><td>体力</td><td>上限 30，每局消耗 5</td></tr>
+  <tr><td>积分</td><td>仅用于补体力：10 → 20 → 40 → …（每次翻倍）</td></tr>
+  <tr><td>金币</td><td>永久货币，商店购买；TD 通关/失败结算获得</td></tr>
+  <tr><td>人气</td><td>局内货币，建造消耗，不出局</td></tr>
+</table>
+
+<h3>开局与结算</h3>
+<table>
+  <tr><th>项目</th><th>数值</th></tr>
+  <tr><td>开局人气</td><td>24（「包场」buff 时 29）</td></tr>
+  <tr><td>每波通关奖励</td><td>+3 人气</td></tr>
+  <tr><td>通关 Stage 1 金币</td><td>30（公式：30 + (stage-1)×15，上限 120）</td></tr>
+  <tr><td>失败安慰金</td><td>3 金币（至少打过 1 波）</td></tr>
+  <tr><td>生命值</td><td>3 心，漏怪扣 1 心/只</td></tr>
+</table>
+<div class="note">注：局内 tempGold（每 5 波 +2）目前在引擎累计，尚未写入结算，等于未生效。</div>
+
+<h2>二、地图 · Stage 1「红毯初登」</h2>
+<table>
+  <tr><th>项目</th><th>数值</th></tr>
+  <tr><td>尺寸</td><td>8×11 格</td></tr>
+  <tr><td>路径</td><td>S 形红毯，21 个路径点</td></tr>
+  <tr><td>出生点</td><td>右上 (6,1)</td></tr>
+  <tr><td>终点</td><td>右下 (7,10) 首映台</td></tr>
+  <tr><td>可建造</td><td>场位 B + 灯位 M（4 个灯位）</td></tr>
+</table>
+
+<h2>三、波次系统（共 20 波）</h2>
+<table>
+  <tr><th>项目</th><th>数值</th></tr>
+  <tr><td>BOSS 波</td><td>第 5 / 10 / 15 / 20 波</td></tr>
+  <tr><td>波间间隔</td><td>3 秒（自动开下一波）</td></tr>
+  <tr><td>首波准备</td><td>点「开始战斗」后 3.5 秒</td></tr>
+  <tr><td>后续波准备</td><td>每波开始前 1 秒</td></tr>
+  <tr><td>刷怪间隔</td><td>1.6 秒/只（BOSS 2.4 秒）</td></tr>
+  <tr><td>战斗 tick</td><td>120ms</td></tr>
+</table>
+
+<h3>每波怪物数量</h3>
+<table>
+  <tr><th>波次类型</th><th>数量公式</th></tr>
+  <tr><td>普通波</td><td>min(2 + 波数, 18) 只</td></tr>
+  <tr><td>BOSS 波</td><td>min(1 + floor(波数/2), 10) 只小怪 + 1 BOSS</td></tr>
+</table>
+
+<h3>怪物组成</h3>
+<ul>
+  <li>默认：黑</li>
+  <li>第 6 波起：每 4 只插 1 只水</li>
+  <li>第 15 波起：每 5 只插 1 只混</li>
+  <li>BOSS 波：末尾 +1 BOSS</li>
+</ul>
+
+<h3>示例波次</h3>
+<table>
+  <tr><th>波</th><th>总数</th><th>含 BOSS</th></tr>
+  <tr><td>1</td><td>3</td><td>—</td></tr>
+  <tr><td>5</td><td>3 + BOSS</td><td>✓</td></tr>
+  <tr><td>10</td><td>6 + BOSS</td><td>✓</td></tr>
+  <tr><td>15</td><td>8 + BOSS</td><td>✓</td></tr>
+  <tr><td>20</td><td>10 + BOSS</td><td>✓</td></tr>
+</table>
+
+<h3>怪物基础属性与血量成长</h3>
+<p>普通怪 HP = 基础HP × (1 + 波数 × 0.08) &nbsp;|&nbsp; BOSS HP = 55 × (2 + 波数 × 0.2)</p>
+<table>
+  <tr><th>怪</th><th>基础HP</th><th>速度(格/秒)</th><th>第1波HP</th><th>第20波HP</th></tr>
+  <tr><td>黑</td><td>8</td><td>0.50</td><td>8.6</td><td>20.8</td></tr>
+  <tr><td>水</td><td>18</td><td>0.36</td><td>19.4</td><td>46.8</td></tr>
+  <tr><td>混</td><td>14</td><td>0.42</td><td>15.1</td><td>36.2</td></tr>
+  <tr><td>BOSS</td><td>55</td><td>0.32</td><td>—</td><td>330（第20波）</td></tr>
+</table>
+<p>减速效果：被减速时移速 × 0.55</p>
+
+<h2>四、剧组小人物（群/粉/编/导）</h2>
+<h3>Lv1 基础数据</h3>
+<table>
+  <tr><th>单位</th><th>人气</th><th>攻击</th><th>射程</th><th>攻速间隔</th><th>攻速(/秒)</th><th>特技</th></tr>
+  <tr><td>群</td><td>3</td><td>2.5</td><td>1.35</td><td>1100ms</td><td>0.91</td><td>堵场：伤害 +15%</td></tr>
+  <tr><td>粉</td><td>4</td><td>2.0</td><td>2.1</td><td>850ms</td><td>1.18</td><td>脱粉：攻击减速</td></tr>
+  <tr><td>编</td><td>5</td><td>1.2</td><td>2.2</td><td>1100ms</td><td>0.91</td><td>改剧本：破绽 +30% 受伤</td></tr>
+  <tr><td>导</td><td>6</td><td>2.2</td><td>2.5</td><td>800ms</td><td>1.25</td><td>全场 action：范围溅射 55%</td></tr>
+</table>
+
+<h3>合成升级（最高 Lv5）</h3>
+<ul>
+  <li>两个同种、同等级可合成，不限距离（点击合成源 + 点目标，或拖放）</li>
+  <li>每升 1 级：攻击 +20%（相对基础）、射程 +0.15 格、攻速间隔 ×0.92（约 +8.7%/级）</li>
+</ul>
+
+<h3>群 Lv1→Lv5 成长示例</h3>
+<table>
+  <tr><th>等级</th><th>攻击</th><th>攻速(/秒)</th><th>含特技攻击</th></tr>
+  <tr><td>Lv1</td><td>2.5</td><td>0.91</td><td>2.9</td></tr>
+  <tr><td>Lv2</td><td>3.0</td><td>0.99</td><td>3.5</td></tr>
+  <tr><td>Lv3</td><td>3.5</td><td>1.07</td><td>4.0</td></tr>
+  <tr><td>Lv4</td><td>4.0</td><td>1.17</td><td>4.6</td></tr>
+  <tr><td>Lv5</td><td>4.5</td><td>1.27</td><td>5.2</td></tr>
+</table>
+
+<h3>特技数值</h3>
+<table>
+  <tr><th>单位</th><th>参数</th></tr>
+  <tr><td>粉 减速</td><td>900 + 等级×250 ms（Lv1=1.15s，Lv5=2.15s）</td></tr>
+  <tr><td>编 破绽</td><td>持续 1200 + 等级×200 ms，受伤 ×1.3</td></tr>
+  <tr><td>导 溅射</td><td>主目标 100%，范围内其他目标 55%</td></tr>
+  <tr><td>粉 buff「死忠粉」</td><td>射程 +1 格（24h）</td></tr>
+</table>
+
+<h2>五、五杰明星</h2>
+<table>
+  <tr><th>明星</th><th>Token</th><th>人气</th><th>攻击</th><th>射程</th><th>间隔</th><th>攻速</th><th>描述</th></tr>
+  <tr><td>武僧 Monk</td><td>#209</td><td>8</td><td>3.5</td><td>2.4</td><td>950ms</td><td>1.05/s</td><td>近身猛击</td></tr>
+  <tr><td>水 Water</td><td>#7308</td><td>8</td><td>2.0</td><td>2.2</td><td>1000ms</td><td>1.00/s</td><td>泼水减速 1200ms</td></tr>
+  <tr><td>阿 May</td><td>#2718</td><td>10</td><td>3.0</td><td>2.5</td><td>800ms</td><td>1.25/s</td><td>快剪连击</td></tr>
+  <tr><td>天人 Celestial</td><td>#1879</td><td>10</td><td>2.8</td><td>2.8</td><td>900ms</td><td>1.11/s</td><td>远程光环</td></tr>
+  <tr><td>布谷 Cuckoo</td><td>#2369</td><td>9</td><td>2.5</td><td>2.3</td><td>750ms</td><td>1.33/s</td><td>节拍点射</td></tr>
+</table>
+
+<h3>五杰升级（打怪经验，最高 Lv5）</h3>
+<table>
+  <tr><th>击杀</th><th>经验</th></tr>
+  <tr><td>黑</td><td>1</td></tr>
+  <tr><td>水</td><td>2</td></tr>
+  <tr><td>混</td><td>3</td></tr>
+  <tr><td>BOSS</td><td>12</td></tr>
+</table>
+<table>
+  <tr><th>等级</th><th>累计经验门槛</th></tr>
+  <tr><td>Lv1</td><td>0</td></tr>
+  <tr><td>Lv2</td><td>3</td></tr>
+  <tr><td>Lv3</td><td>8</td></tr>
+  <tr><td>Lv4</td><td>15</td></tr>
+  <tr><td>Lv5</td><td>25（满级需 40 累计）</td></tr>
+</table>
+<p>每升 1 级：攻击 +18%、射程 +0.12、攻速间隔 ×0.92</p>
+
+<h2>六、商店（24 小时 buff）</h2>
+<table>
+  <tr><th>ID</th><th>名称</th><th>价格</th><th>描述</th><th>已实现</th></tr>
+  <tr><td>notice</td><td>通告费</td><td>25G</td><td>开采格产出×2</td><td class="no">未接入</td></tr>
+  <tr><td>hot</td><td>热搜体质</td><td>40G</td><td>明星出现率×2</td><td class="no">未接入</td></tr>
+  <tr><td>promo</td><td>升职令</td><td>50G</td><td>新单位 5% 直接 Lv2</td><td class="no">未接入</td></tr>
+  <tr><td>fan</td><td>死忠粉</td><td>35G</td><td>粉射程 +1</td><td class="ok">已实现</td></tr>
+  <tr><td>shield</td><td>烂片免疫</td><td>45G</td><td>每局免漏 1 只扣心</td><td class="ok">已实现</td></tr>
+  <tr><td>pack</td><td>包场</td><td>60G</td><td>开局人气 +5</td><td class="ok">已实现</td></tr>
+  <tr><td>buy_hype</td><td>买热搜</td><td>15G</td><td>本局 +15 人气</td><td class="no">未接入</td></tr>
+  <tr><td>freeze</td><td>封镜头</td><td>25G</td><td>全场定身 3 秒</td><td class="no">未接入</td></tr>
+  <tr><td>nerf</td><td>加场</td><td>30G</td><td>本波敌人 -20% 血</td><td class="ok">已实现</td></tr>
+</table>
+
+<h2>七、操作说明</h2>
+<table>
+  <tr><th>功能</th><th>说明</th></tr>
+  <tr><td>选角</td><td>点底部按钮选要建造的单位</td></tr>
+  <tr><td>建造</td><td>点绿色 + 场位（战斗中也可建）</td></tr>
+  <tr><td>查看属性</td><td>点场上单位，选角栏底部信息条显示攻击 + 攻速 + 等级 + 特技</td></tr>
+  <tr><td>合成</td><td>点单位 →「选为合成源」→ 点另一个同种同级；或拖放合成</td></tr>
+  <tr><td>移动</td><td>拖到场位空格</td></tr>
+  <tr><td>开战</td><td>摆好后点「开始战斗」，之后 20 波全自动</td></tr>
+  <tr><td>本地试玩</td><td>开发环境无需钱包，点「本地试玩」</td></tr>
+</table>
+
+<h2>八、技术说明</h2>
+<ul>
+  <li>前端：Next.js 14 静态导出，路由 <code>/zh/td</code>、<code>/en/td</code></li>
+  <li>API：Cloudflare Pages Functions <code>/api/td/</code></li>
+  <li>Nobody 合约：<code>0xa28d6a8eb65a41f3958f1de62cbfca20b817e66a</code></li>
+  <li>无 KV 时 API 使用内存回退（重启后数据清空）</li>
+</ul>
+
+<div class="footer">
+  web3-farm · 小人物塔防 M1 · 自动生成于 2026-06-07 · 供策划评审用
+</div>
+
+</body>
+</html>
