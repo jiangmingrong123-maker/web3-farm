@@ -4,9 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { useAccount } from "wagmi";
 import { useFarmSign } from "@/lib/web3/use-farm-sign";
-import { TD_TICK_MS } from "@/config/td/pacing";
 import { STAGE1_NAME } from "@/config/td/stage1";
-import { STAGE1_TAGLINE } from "@/config/td/stage-theme";
 import { SHOP_ITEMS } from "@/config/td/shop";
 import { STAMINA_PER_RUN, STAMINA_REFILL_AMOUNT } from "@/config/td/economy";
 import { START_POPULARITY } from "@/config/td/units";
@@ -20,16 +18,13 @@ import {
   type TdProfile,
 } from "@/lib/td-api";
 import {
-  createRunState,
-  isDefeat,
-  isVictory,
-  beginBattle,
-  dropTower,
-  mergeCrewTowers,
-  placeTower,
-  tickRun,
-  type RunState,
-} from "@/lib/td/engine";
+  createTextBattle,
+  isTextVictory,
+  mergeRosterUnits,
+  recruitUnit,
+  simulateWave,
+  type TextBattleState,
+} from "@/lib/td/text-combat";
 import {
   DEMO_FARM_POINTS,
   defaultDemoProfile,
@@ -42,14 +37,8 @@ import {
   demoStart,
   isTdDevDemoEnabled,
 } from "@/lib/td/demo-store";
-import { TdBattleGrid } from "@/components/td/TdBattleGrid";
-import { TdMergeBar } from "@/components/td/TdMergeBar";
-import { TdTowerPicker } from "@/components/td/TdTowerPicker";
-import {
-  playTdSfx,
-  setTdMuted,
-  unlockTdAudio,
-} from "@/lib/td/sfx";
+import { TdTextBattle } from "@/components/td/TdTextBattle";
+import { playTdSfx } from "@/lib/td/sfx";
 import type { TowerKind } from "@/lib/td/towers";
 
 type Screen = "hub" | "shop" | "play";
@@ -81,22 +70,11 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
   const [resultMsg, setResultMsg] = useState<string | null>(null);
 
   const [runId, setRunId] = useState<string | null>(null);
-  const [run, setRun] = useState<RunState | null>(null);
-  const [selectedKind, setSelectedKind] = useState<TowerKind>("群");
-  const [paused, setPaused] = useState(false);
-  const [mergeSourceId, setMergeSourceId] = useState<string | null>(null);
-  const [inspectedTowerId, setInspectedTowerId] = useState<string | null>(null);
-  const [soundOn, setSoundOn] = useState(true);
+  const [textBattle, setTextBattle] = useState<TextBattleState | null>(null);
   const [demoMode, setDemoMode] = useState(false);
   const devDemo = isTdDevDemoEnabled();
-  const runRef = useRef<RunState | null>(null);
   const buffsRef = useRef<string[]>([]);
   const finishingRef = useRef(false);
-  const runFxRef = useRef<RunState | null>(null);
-
-  useEffect(() => {
-    setTdMuted(!soundOn);
-  }, [soundOn]);
 
   const [screen, setScreen] = useState<Screen>("hub");
 
@@ -140,35 +118,8 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
     }
   }, [isConnected, address, refresh, demoMode]);
 
-  useEffect(() => {
-    if (screen !== "play" || !runId) return;
-    const id = setInterval(() => {
-      if (paused) return;
-      const cur = runRef.current;
-      if (!cur) return;
-      const next = tickRun(cur, Date.now(), buffsRef.current);
-      runFxRef.current = cur;
-      runRef.current = next;
-      setRun(next);
-
-      if (runFxRef.current && next.hearts < runFxRef.current.hearts) {
-        playTdSfx("leak");
-      }
-      if (
-        runFxRef.current?.waveActive &&
-        !next.waveActive &&
-        next.wave > 0 &&
-        runFxRef.current.wave === next.wave
-      ) {
-        playTdSfx("wave_clear");
-      }
-    }, TD_TICK_MS);
-    return () => clearInterval(id);
-  }, [screen, runId, paused]);
-
-  const updateRun = (next: RunState) => {
-    runRef.current = next;
-    setRun(next);
+  const updateBattle = (next: TextBattleState) => {
+    setTextBattle(next);
   };
 
   const handleRefill = async () => {
@@ -277,7 +228,7 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
     const ok = await settleRun(false, wavesReached);
     if (!ok && !demoMode) setError(t("forfeitFailed"));
     setRunId(null);
-    setRun(null);
+    setTextBattle(null);
     setScreen("hub");
   };
   const handleStart = async () => {
@@ -290,12 +241,13 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
       }
       setProfile(res.profile);
       buffsRef.current = activeBuffIds(res.profile);
-      const pop = START_POPULARITY + (buffsRef.current.includes("pack") ? 5 : 0);
-      const initial = createRunState(pop);
-      runRef.current = initial;
       finishingRef.current = false;
       setRunId(res.runId);
-      setRun(initial);
+      setTextBattle(
+        createTextBattle(
+          START_POPULARITY + (buffsRef.current.includes("pack") ? 5 : 0),
+        ),
+      );
       setScreen("play");
       setResultMsg(null);
       return;
@@ -311,13 +263,11 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
     }
     setProfile(res.profile);
     buffsRef.current = activeBuffIds(res.profile);
-    const pop =
+    const pop2 =
       START_POPULARITY + (buffsRef.current.includes("pack") ? 5 : 0);
-    const initial = createRunState(pop);
-    runRef.current = initial;
     finishingRef.current = false;
     setRunId(res.runId);
-    setRun(initial);
+    setTextBattle(createTextBattle(pop2));
     setScreen("play");
     setResultMsg(null);
   };
@@ -328,99 +278,49 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
       if (!ok && !demoMode) setError(t("forfeitFailed"));
       finishingRef.current = true;
       setRunId(null);
-      setRun(null);
+      setTextBattle(null);
       setScreen("hub");
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- settleRun closes over latest profile/runId
     [address, demoMode, profile, runId, sign, t, refresh],
   );
 
-  useEffect(() => {
-    if (!run || screen !== "play" || finishingRef.current) return;
-    if (isVictory(run)) {
-      finishingRef.current = true;
-      playTdSfx("victory");
-      endRun(true, run.wave);
-    } else if (isDefeat(run)) {
-      finishingRef.current = true;
-      playTdSfx("defeat");
-      endRun(false, run.wave);
-    }
-  }, [run, screen, endRun]);
-
-  const handleCellClick = (x: number, y: number) => {
-    unlockTdAudio();
-    setMergeSourceId(null);
-    if (!run || paused) return;
-    const next = placeTower(run, selectedKind, x, y);
+  const handleRecruit = (kind: TowerKind) => {
+    if (!textBattle) return;
+    const next = recruitUnit(textBattle, kind);
     if (next) {
       playTdSfx("build");
-      updateRun(next);
+      updateBattle(next);
     }
   };
 
-  const handleTowerClick = (towerId: string) => {
-    if (!run || paused) return;
-    const tower = run.towers.find((t) => t.id === towerId);
-    if (!tower) return;
-
-    setInspectedTowerId(towerId);
-
-    if (mergeSourceId && mergeSourceId !== towerId) {
-      const merged = mergeCrewTowers(run, mergeSourceId, towerId);
-      if (merged) {
-        playTdSfx("build");
-        updateRun(merged);
-        setMergeSourceId(null);
-        setInspectedTowerId(towerId);
-        return;
-      }
-      setMergeSourceId(null);
-    }
-
-    if (mergeSourceId === towerId) {
-      setMergeSourceId(null);
-      return;
+  const handleRosterMerge = (fromId: string, toId: string) => {
+    if (!textBattle) return;
+    const next = mergeRosterUnits(textBattle, fromId, toId);
+    if (next) {
+      playTdSfx("build");
+      updateBattle(next);
     }
   };
 
-  const handleTowerDragStart = () => {
-    setMergeSourceId(null);
-  };
-
-  const handleTowerDrop = (towerId: string, x: number, y: number) => {
-    if (!run || paused) return;
-    setMergeSourceId(null);
-    const result = dropTower(run, towerId, x, y);
-    if (result) {
-      playTdSfx(result.action === "merge" ? "build" : "ui");
-      updateRun(result.state);
-    }
-  };
-
-  const handleMergeWith = (sourceId: string, targetId: string) => {
-    if (!run || paused) return;
-    const merged = mergeCrewTowers(run, sourceId, targetId);
-    if (!merged) return;
-    playTdSfx("build");
-    updateRun(merged);
-    setMergeSourceId(null);
-    setInspectedTowerId(targetId);
-  };
-
-  const handleBeginBattle = () => {
-    unlockTdAudio();
-    if (!run || run.battleStarted) return;
+  const handleFightWave = () => {
+    if (!textBattle) return;
     playTdSfx("wave_start");
-    updateRun(beginBattle(run));
+    const next = simulateWave(textBattle, buffsRef.current, locale);
+    updateBattle(next);
+    if (next.phase === "done") {
+      if (isTextVictory(next)) playTdSfx("victory");
+      else playTdSfx("defeat");
+    } else {
+      playTdSfx("wave_clear");
+    }
   };
 
-  const handleFxSound = useCallback((kind: "hit" | "die" | "shoot" | "shoot_star") => {
-    if (kind === "shoot_star") playTdSfx("shoot_star");
-    else if (kind === "shoot") playTdSfx("shoot");
-    else if (kind === "hit") playTdSfx("hit");
-    else playTdSfx("enemy_die");
-  }, []);
+  const handleBattleFinish = () => {
+    if (!textBattle) return;
+    if (isTextVictory(textBattle)) void endRun(true, textBattle.wave);
+    else void endRun(false, textBattle.wave);
+  };
 
   const handleBuy = async (itemId: string) => {
     if (!profile) return;
@@ -476,7 +376,7 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
         <div>
           <h1 className="font-display text-2xl font-bold text-gold">{t("title")}</h1>
           <p className="mt-1 text-sm text-white/50">
-            {demoMode ? t("demoBadge") : screen === "play" ? STAGE1_TAGLINE : t("subtitle")}
+            {demoMode ? t("demoBadge") : screen === "play" ? t("textModeTagline") : t("subtitle")}
           </p>
         </div>
         {screen === "hub" && (
@@ -494,8 +394,8 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
           <button
             type="button"
             onClick={() => {
-              if (screen === "play" && run) {
-                handleForfeit(run.wave);
+              if (screen === "play" && textBattle) {
+                handleForfeit(textBattle.wave);
               } else {
                 setScreen("hub");
               }
@@ -643,107 +543,16 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
         </div>
       )}
 
-      {screen === "play" && run && (
-        <div className="space-y-4 pb-28 sm:pb-0">
-          <div className="flex flex-wrap items-center gap-4 text-sm">
-            <span>{t("wave")}: {run.wave}/20</span>
-            <span>{t("hearts")}: {"❤".repeat(run.hearts)}{"🖤".repeat(3 - run.hearts)}</span>
-            <span>{t("popularity")}: {Math.floor(run.popularity)}</span>
-            <button
-              type="button"
-              onClick={() => setPaused((p) => !p)}
-              className="rounded border border-white/20 px-3 py-1 text-xs hover:border-white/40"
-            >
-              {paused ? t("resume") : t("pause")}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                unlockTdAudio();
-                setSoundOn((s) => !s);
-              }}
-              className="rounded border border-white/20 px-3 py-1 text-xs hover:border-white/40"
-            >
-              {soundOn ? t("soundOn") : t("soundOff")}
-            </button>
-          </div>
-
-          {!run.battleStarted && (
-            <div className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-4 py-3 text-center text-sm text-cyan-100">
-              {t("placementHint")}
-            </div>
-          )}
-
-          <TdTowerPicker
-            selected={selectedKind}
-            disabled={paused}
-            inspectedTower={run.towers.find((tw) => tw.id === inspectedTowerId) ?? null}
-            mergeSourceId={mergeSourceId}
-            allTowers={run.towers}
-            onMergeSelect={(id) => {
-              playTdSfx("ui");
-              setMergeSourceId(id);
-            }}
-            onMergeCancel={() => setMergeSourceId(null)}
-            onSelect={(k) => {
-              unlockTdAudio();
-              playTdSfx("ui");
-              setSelectedKind(k);
-              setMergeSourceId(null);
-              setInspectedTowerId(null);
-            }}
-          />
-
-          <TdBattleGrid
-            run={run}
-            selectedKind={selectedKind}
-            paused={paused}
-            mergeSourceId={mergeSourceId}
-            inspectedTowerId={inspectedTowerId}
-            onCellClick={handleCellClick}
-            onTowerClick={handleTowerClick}
-            onTowerDragStart={handleTowerDragStart}
-            onTowerDrop={handleTowerDrop}
-            onFxSound={handleFxSound}
-          />
-
-          <div className="flex flex-wrap gap-3">
-            {!run.battleStarted && (
-              <button
-                type="button"
-                disabled={paused}
-                onClick={handleBeginBattle}
-                className="rounded-lg bg-gold px-6 py-2 text-sm font-semibold text-ink disabled:opacity-40"
-              >
-                {t("beginBattle")}
-              </button>
-            )}
-            {run.battleStarted && run.interWaveTimer > 0 && (
-              <span className="self-center text-xs text-gold/80">
-                {t("interWave", { sec: Math.ceil(run.interWaveTimer / 1000) })}
-              </span>
-            )}
-            {run.battleStarted && run.waveActive && !paused && (
-              <span className="self-center text-xs text-white/45">{t("waveActive")}</span>
-            )}
-            {paused && (
-              <span className="self-center text-xs text-amber-300/80">{t("pausedHint")}</span>
-            )}
-          </div>
-
-          <TdMergeBar
-            inspectedTower={run.towers.find((tw) => tw.id === inspectedTowerId) ?? null}
-            mergeSourceId={mergeSourceId}
-            allTowers={run.towers}
-            paused={paused}
-            onMergeSelect={(id) => {
-              playTdSfx("ui");
-              setMergeSourceId(id);
-            }}
-            onMergeCancel={() => setMergeSourceId(null)}
-            onMergeWith={handleMergeWith}
-          />
-        </div>
+      {screen === "play" && textBattle && (
+        <TdTextBattle
+          battle={textBattle}
+          buffs={buffs}
+          locale={locale}
+          onRecruit={handleRecruit}
+          onMerge={handleRosterMerge}
+          onFightWave={handleFightWave}
+          onFinish={handleBattleFinish}
+        />
       )}
 
       {loading && screen === "hub" && !profile && (

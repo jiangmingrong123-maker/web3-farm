@@ -106,7 +106,7 @@ export function isBossWave(wave: number): boolean {
   return wave > 0 && wave % 5 === 0;
 }
 
-function waveComposition(wave: number): EnemyKind[] {
+export function waveComposition(wave: number): EnemyKind[] {
   const list: EnemyKind[] = [];
   const boss = isBossWave(wave);
   const n = boss ? Math.min(1 + Math.floor(wave / 2), 10) : Math.min(2 + wave, 18);
