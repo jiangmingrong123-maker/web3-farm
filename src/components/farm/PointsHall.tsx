@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
-import { useAccount, useSignMessage } from "wagmi";
+import { useAccount } from "wagmi";
 import { mainnet } from "wagmi/chains";
+import { useFarmSign } from "@/lib/web3/use-farm-sign";
 import { AddNftPanel } from "@/components/swap/AddNftPanel";
 import {
   DAILY_POINTS_CAP,
@@ -19,7 +20,6 @@ import {
   syncFarmBindingsApi,
   syncFarmBindingsClient,
   unlockSlotApi,
-  type FarmSignFn,
 } from "@/lib/farm-api";
 import {
   accrualStopped,
@@ -52,7 +52,7 @@ export function PointsHall({ locale }: { locale: string }) {
   const t = useTranslations("hall");
   const tCommon = useTranslations("common");
   const { address, isConnected, chainId } = useAccount();
-  const { signMessageAsync } = useSignMessage();
+  const sign = useFarmSign();
   const [state, setState] = useState<FarmState | null>(null);
   const [bindingSlot, setBindingSlot] = useState<number | null>(null);
   const [bindError, setBindError] = useState<string | null>(null);
@@ -60,14 +60,6 @@ export function PointsHall({ locale }: { locale: string }) {
   const [bindingsRemoved, setBindingsRemoved] = useState<string[]>([]);
   const [unlockingSlot, setUnlockingSlot] = useState<number | null>(null);
   const [, setTick] = useState(0);
-
-  const sign: FarmSignFn = useCallback(
-    async (message) => {
-      if (!signMessageAsync) throw new Error("no signer");
-      return signMessageAsync({ message });
-    },
-    [signMessageAsync],
-  );
 
   const applyState = useCallback((wallet: string, next: FarmState) => {
     const synced = syncAccrual(next, Date.now());
@@ -196,6 +188,10 @@ export function PointsHall({ locale }: { locale: string }) {
         setActionError(t("errSignRejected"));
         return;
       }
+      if (result.error === "INVALID_SIGNATURE") {
+        setActionError(t("errInvalidSignature"));
+        return;
+      }
       if (result.error === "ALREADY_UNLOCKED" || result.error === "UNLOCK_ORDER") {
         const synced = await refreshFromServer();
         const nextSlot = synced?.unlockedSlots ?? result.unlockedSlots ?? current.unlockedSlots;
@@ -215,6 +211,17 @@ export function PointsHall({ locale }: { locale: string }) {
             have: Math.floor(result.have ?? balance),
           }),
         );
+        return;
+      }
+      setActionError(t("actionFailed"));
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg === "WRONG_NETWORK" || msg.includes("WRONG_NETWORK")) {
+        setActionError(tCommon("wrongNetwork"));
+        return;
+      }
+      if (/reject|denied|cancel|用户拒绝|取消/i.test(msg)) {
+        setActionError(t("errSignRejected"));
         return;
       }
       setActionError(t("actionFailed"));
@@ -299,6 +306,11 @@ export function PointsHall({ locale }: { locale: string }) {
           <div>
             <p className="mb-1 text-xs tracking-[0.2em] text-gold/70">{t("seasonBadge")}</p>
             <h1 className="font-display text-2xl font-bold sm:text-3xl">{t("title")}</h1>
+            {address && (
+              <p className="mt-1 font-mono text-[10px] text-white/35 sm:text-xs">
+                {t("connectedWallet", { addr: `${address.slice(0, 6)}…${address.slice(-4)}` })}
+              </p>
+            )}
             <p className="mt-2 max-w-md text-sm text-white/50">{t("subtitle")}</p>
           </div>
 
@@ -456,6 +468,7 @@ export function PointsHall({ locale }: { locale: string }) {
                   canUnlock={canUnlock}
                   unlockHint={unlockHint}
                   unlocking={unlockingSlot === index}
+                  unlockDisabled={wrongNetwork || !isConnected}
                   onUnlock={() => void handleUnlock(index)}
                   onBind={
                     isConnected && status === "empty"

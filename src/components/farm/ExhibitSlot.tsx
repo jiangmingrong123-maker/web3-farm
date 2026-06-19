@@ -20,6 +20,7 @@ interface ExhibitSlotProps {
   canUnlock?: boolean;
   unlockHint?: string;
   unlocking?: boolean;
+  unlockDisabled?: boolean;
 }
 
 export function ExhibitSlot({
@@ -34,6 +35,7 @@ export function ExhibitSlot({
   canUnlock,
   unlockHint,
   unlocking = false,
+  unlockDisabled = false,
 }: ExhibitSlotProps) {
   const t = useTranslations("hall");
   const cost = SLOT_UNLOCK_COSTS[index] ?? 0;
@@ -86,10 +88,14 @@ export function ExhibitSlot({
               <button
                 type="button"
                 onClick={onUnlock}
-                disabled={!canUnlock || unlocking}
+                disabled={unlocking || unlockDisabled}
                 className="w-full shrink-0 rounded-full border border-gold/50 bg-gold/10 py-2 text-[11px] font-semibold text-gold transition hover:bg-gold/20 disabled:cursor-not-allowed disabled:border-white/15 disabled:bg-white/5 disabled:text-white/35 sm:py-1.5"
               >
-                {unlocking ? t("unlocking") : canUnlock ? t("unlock") : t("unlockNeedPoints")}
+                {unlocking
+                  ? t("unlocking")
+                  : canUnlock
+                    ? t("unlock")
+                    : t("unlockNeedPoints")}
               </button>
             )}
             {isNextUnlock && unlockHint && (

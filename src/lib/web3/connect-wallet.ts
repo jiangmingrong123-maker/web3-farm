@@ -7,7 +7,10 @@ export function isMobileBrowser(): boolean {
 
 export function hasInjectedProvider(): boolean {
   if (typeof window === "undefined") return false;
-  return Boolean((window as Window & { ethereum?: unknown }).ethereum);
+  return Boolean(
+    (window as Window & { okxwallet?: unknown; ethereum?: unknown }).okxwallet ??
+      (window as Window & { ethereum?: unknown }).ethereum,
+  );
 }
 
 export function metamaskDappUrl(currentUrl: string): string {
@@ -16,7 +19,7 @@ export function metamaskDappUrl(currentUrl: string): string {
   )}`;
 }
 
-/** Pick injected on desktop; WalletConnect on mobile Safari/Chrome when no extension. */
+/** Pick injected on desktop; WalletConnect on mobile when no in-app browser. */
 export function pickConnectConnector(connectors: readonly Connector[]): Connector | null {
   const injected = connectors.find((c) => c.type === "injected");
   const walletConnect = connectors.find((c) => c.type === "walletConnect");

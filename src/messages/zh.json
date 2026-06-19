@@ -107,6 +107,8 @@
     "unlockHintSign": "解锁需钱包签名（不扣 gas）",
     "errInsufficientPoints": "积分不足：需要 {need} 分，当前 {have} 分",
     "errSignRejected": "已取消签名，解锁未完成",
+    "errInvalidSignature": "签名验证失败：请在 OKX 确认当前账户，或断开重连后再试",
+    "connectedWallet": "当前钱包 {addr}",
     "errUnlockOrder": "请按顺序解锁，先解开展柜下一格",
     "errUnlockOrderDetail": "请先解锁 {slot} 号展位（手机/电脑需点「刷新」同步进度）",
     "nextUnlockBanner": "下一格 {slot} · 需要 {cost} 分 · 余额 {balance}",

@@ -107,6 +107,8 @@
     "unlockHintSign": "Unlock requires wallet signature (no gas)",
     "errInsufficientPoints": "Not enough points: need {need}, have {have}",
     "errSignRejected": "Signature cancelled — unlock not completed",
+    "errInvalidSignature": "Signature invalid — confirm the active OKX account or reconnect",
+    "connectedWallet": "Wallet {addr}",
     "errUnlockOrder": "Unlock slots in order — do the next one first",
     "errUnlockOrderDetail": "Unlock slot {slot} first (tap Refresh to sync phone/PC)",
     "nextUnlockBanner": "Next slot {slot} · costs {cost} pts · balance {balance}",

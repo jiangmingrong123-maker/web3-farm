@@ -10,6 +10,7 @@ import {
   pickConnectConnector,
 } from "@/lib/web3/connect-wallet";
 import { hasWalletConnect } from "@/lib/web3/config";
+import { isOkxBrowser } from "@/lib/web3/providers";
 
 export function WalletButton() {
   const t = useTranslations("common");
@@ -28,7 +29,7 @@ export function WalletButton() {
 
   const connectorLabel = (id: string, type: string) => {
     if (type === "walletConnect") return t("connectWalletConnect");
-    if (id === "io.metamask" || type === "injected") return "MetaMask";
+    if (id === "io.metamask" || type === "injected") return isOkxBrowser() ? "OKX Wallet" : "MetaMask";
     return id;
   };
 
@@ -110,7 +111,7 @@ export function WalletButton() {
 
   return (
     <div className="flex items-center gap-2">
-      <span className="hidden text-xs text-white/50 sm:inline" lang={locale}>
+      <span className="text-xs text-white/50" lang={locale}>
         {short}
       </span>
       <button

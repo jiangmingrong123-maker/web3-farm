@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
-import { useAccount, useSignMessage } from "wagmi";
+import { useAccount } from "wagmi";
+import { useFarmSign } from "@/lib/web3/use-farm-sign";
 import { TD_TICK_MS } from "@/config/td/pacing";
 import { STAGE1_NAME } from "@/config/td/stage1";
 import { STAGE1_TAGLINE } from "@/config/td/stage-theme";
@@ -17,7 +18,6 @@ import {
   refillTdStaminaApi,
   startTdRunApi,
   type TdProfile,
-  type TdSignFn,
 } from "@/lib/td-api";
 import {
   createRunState,
@@ -70,9 +70,7 @@ function formatExpiry(ms: number, locale: string) {
 export function TowerDefenseApp({ locale }: { locale: string }) {
   const t = useTranslations("td");
   const { address, isConnected } = useAccount();
-  const { signMessageAsync } = useSignMessage();
-
-  const [screen, setScreen] = useState<Screen>("hub");
+  const sign = useFarmSign();
   const [profile, setProfile] = useState<TdProfile | null>(null);
   const [farmPoints, setFarmPoints] = useState(0);
   const [refillCost, setRefillCost] = useState(0);
@@ -99,13 +97,7 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
     setTdMuted(!soundOn);
   }, [soundOn]);
 
-  const sign: TdSignFn = useCallback(
-    async (message) => {
-      if (!signMessageAsync) throw new Error("no signer");
-      return signMessageAsync({ message });
-    },
-    [signMessageAsync],
-  );
+  const [screen, setScreen] = useState<Screen>("hub");
 
   const enterDemo = useCallback(() => {
     const p = defaultDemoProfile();

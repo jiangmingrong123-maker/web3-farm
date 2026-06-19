@@ -14,7 +14,7 @@ function isSignRejected(err: unknown): boolean {
     : typeof err === "object" && err && "shortMessage" in err
       ? String((err as { shortMessage?: string }).shortMessage)
       : String(err);
-  return /reject|denied|cancel|declined|user refused/i.test(msg);
+  return /reject|denied|cancel|declined|user refused|用户拒绝|取消|拒签|拒绝/i.test(msg);
 }
 
 async function signedPost<T>(
@@ -113,8 +113,11 @@ export async function unlockSlotApi(
       unlockedSlots?: number;
       needSlot?: number;
     };
-    if (res.status === 401 || res.status === 403) {
+    if (res.status === 401) {
       return { error: "SIGN_REJECTED" };
+    }
+    if (res.status === 403) {
+      return { error: "INVALID_SIGNATURE" };
     }
     if (data.ok && data.state) return { state: data.state };
     return {
