@@ -13,9 +13,12 @@ interface ExhibitSlotProps {
   imageUrl?: string;
   /** Show unlock cost (only next 2 locked slots). */
   showUnlockCost?: boolean;
+  /** Next slot in sequence — show unlock UI even if points insufficient. */
+  isNextUnlock?: boolean;
   onUnlock?: () => void;
   onBind?: () => void;
   canUnlock?: boolean;
+  unlockHint?: string;
 }
 
 export function ExhibitSlot({
@@ -24,9 +27,11 @@ export function ExhibitSlot({
   label,
   imageUrl,
   showUnlockCost = false,
+  isNextUnlock = false,
   onUnlock,
   onBind,
   canUnlock,
+  unlockHint,
 }: ExhibitSlotProps) {
   const t = useTranslations("hall");
   const cost = SLOT_UNLOCK_COSTS[index] ?? 0;
@@ -75,14 +80,20 @@ export function ExhibitSlot({
               <p className="shrink-0 pb-1 text-[10px] text-white/20">···</p>
             )}
 
-            {canUnlock && onUnlock && (
+            {isNextUnlock && onUnlock && (
               <button
                 type="button"
                 onClick={onUnlock}
-                className="w-full shrink-0 rounded-full border border-gold/50 bg-gold/10 py-1.5 text-[10px] font-semibold text-gold transition hover:bg-gold/20 sm:py-1"
+                disabled={!canUnlock}
+                className="w-full shrink-0 rounded-full border border-gold/50 bg-gold/10 py-2 text-[11px] font-semibold text-gold transition hover:bg-gold/20 disabled:cursor-not-allowed disabled:border-white/15 disabled:bg-white/5 disabled:text-white/35 sm:py-1.5"
               >
-                {t("unlock")}
+                {canUnlock ? t("unlock") : t("unlockNeedPoints")}
               </button>
+            )}
+            {isNextUnlock && unlockHint && (
+              <p className="shrink-0 text-center text-[9px] leading-tight text-amber-300/80 sm:text-[10px]">
+                {unlockHint}
+              </p>
             )}
           </div>
         )}

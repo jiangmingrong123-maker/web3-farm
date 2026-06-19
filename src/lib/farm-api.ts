@@ -82,19 +82,25 @@ export async function unlockSlotApi(
   wallet: string,
   slotIndex: number,
   sign: FarmSignFn,
-): Promise<FarmState | null> {
-  const data = await signedPost<{
-    ok?: boolean;
-    state?: FarmState;
-  }>(
-    wallet,
-    "unlock-slot",
-    "unlock-slot",
-    { slotIndex },
-    sign,
-    `slot=${slotIndex}`,
-  );
-  return data?.ok && data.state ? data.state : null;
+): Promise<{ state: FarmState } | { error: string }> {
+  try {
+    const timestamp = Date.now();
+    const message = buildFarmSignMessage("unlock-slot", wallet, timestamp, `slot=${slotIndex}`);
+    const signature = await sign(message);
+    const res = await fetch(`${API}/${wallet.toLowerCase()}/unlock-slot`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ slotIndex, timestamp, signature }),
+    });
+    const data = (await res.json()) as { ok?: boolean; state?: FarmState; error?: string };
+    if (res.status === 401 || res.status === 403) {
+      return { error: "SIGN_REJECTED" };
+    }
+    if (data.ok && data.state) return { state: data.state };
+    return { error: data.error ?? "NETWORK" };
+  } catch {
+    return { error: "NETWORK" };
+  }
 }
 
 export async function bindNftApi(

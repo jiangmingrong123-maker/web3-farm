@@ -142,12 +142,29 @@ export function PointsHall({ locale }: { locale: string }) {
   const handleUnlock = async (slotIndex: number) => {
     if (!address || !state) return;
     setActionError(null);
-    const saved = await unlockSlotApi(address, slotIndex, sign);
-    if (!saved) {
-      setActionError(t("actionFailed"));
+    const cost = SLOT_UNLOCK_COSTS[slotIndex] ?? 0;
+    if (state.points < cost) {
+      setActionError(t("errInsufficientPoints", { need: cost, have: Math.floor(state.points) }));
       return;
     }
-    applyState(address, saved);
+    const result = await unlockSlotApi(address, slotIndex, sign);
+    if ("state" in result) {
+      applyState(address, result.state);
+      return;
+    }
+    if (result.error === "SIGN_REJECTED") {
+      setActionError(t("errSignRejected"));
+      return;
+    }
+    if (result.error === "UNLOCK_FAILED") {
+      setActionError(t("errUnlockOrder"));
+      return;
+    }
+    if (result.error === "INSUFFICIENT_POINTS") {
+      setActionError(t("errInsufficientPoints", { need: cost, have: Math.floor(state.points) }));
+      return;
+    }
+    setActionError(t("actionFailed"));
   };
 
   const handleBindNft = async (nft: VerifiedNft) => {
@@ -292,11 +309,14 @@ export function PointsHall({ locale }: { locale: string }) {
                 status === "locked" &&
                 index > unlockedCount &&
                 index <= unlockedCount + 2;
-              const canUnlock =
-                !!state &&
-                nextLocked &&
-                status === "locked" &&
-                state.points >= cost;
+              const isNextUnlock = !!state && nextLocked && status === "locked";
+              const canUnlock = isNextUnlock && state.points >= cost;
+              const unlockHint =
+                isNextUnlock && state.points < cost
+                  ? t("unlockHintPoints", { have: Math.floor(state.points), need: cost })
+                  : isNextUnlock
+                    ? t("unlockHintSign")
+                    : undefined;
 
               return (
                 <ExhibitSlot
@@ -306,7 +326,9 @@ export function PointsHall({ locale }: { locale: string }) {
                   label={bound?.name}
                   imageUrl={bound?.imageUrl}
                   showUnlockCost={showUnlockCost}
+                  isNextUnlock={isNextUnlock}
                   canUnlock={canUnlock}
+                  unlockHint={unlockHint}
                   onUnlock={() => void handleUnlock(index)}
                   onBind={
                     isConnected && status === "empty"

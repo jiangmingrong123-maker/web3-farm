@@ -567,6 +567,12 @@ export const onRequest = async (context: {
     }
 
     const state = await loadOrCreate(env, wallet);
+    if (state.points < cost) {
+      return json(
+        { ok: false, error: "INSUFFICIENT_POINTS", need: cost, have: state.points },
+        400,
+      );
+    }
     const next = unlockSlot(state, slotIndex, cost);
     if (!next) {
       return json({ ok: false, error: "UNLOCK_FAILED" }, 400);
