@@ -82,7 +82,10 @@ export async function unlockSlotApi(
   wallet: string,
   slotIndex: number,
   sign: FarmSignFn,
-): Promise<{ state: FarmState } | { error: string }> {
+): Promise<
+  | { state: FarmState }
+  | { error: string; need?: number; have?: number; unlockedSlots?: number; needSlot?: number }
+> {
   try {
     const timestamp = Date.now();
     const message = buildFarmSignMessage("unlock-slot", wallet, timestamp, `slot=${slotIndex}`);
@@ -92,12 +95,26 @@ export async function unlockSlotApi(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ slotIndex, timestamp, signature }),
     });
-    const data = (await res.json()) as { ok?: boolean; state?: FarmState; error?: string };
+    const data = (await res.json()) as {
+      ok?: boolean;
+      state?: FarmState;
+      error?: string;
+      need?: number;
+      have?: number;
+      unlockedSlots?: number;
+      needSlot?: number;
+    };
     if (res.status === 401 || res.status === 403) {
       return { error: "SIGN_REJECTED" };
     }
     if (data.ok && data.state) return { state: data.state };
-    return { error: data.error ?? "NETWORK" };
+    return {
+      error: data.error ?? "NETWORK",
+      need: data.need,
+      have: data.have,
+      unlockedSlots: data.unlockedSlots,
+      needSlot: data.needSlot,
+    };
   } catch {
     return { error: "NETWORK" };
   }

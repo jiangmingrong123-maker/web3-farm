@@ -72,6 +72,24 @@ export function PointsHall({ locale }: { locale: string }) {
     return synced;
   }, []);
 
+  const refreshFromServer = useCallback(async (): Promise<FarmState | null> => {
+    if (!address) return null;
+    const remote = await fetchFarmStateApi(address);
+    if (!remote) return null;
+    return applyState(address, remote);
+  }, [address, applyState]);
+
+  useEffect(() => {
+    if (!address) return;
+    const onVisible = () => {
+      if (document.visibilityState === "visible") {
+        void refreshFromServer();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [address, refreshFromServer]);
+
   const verifyAndSyncBindings = useCallback(
     async (wallet: string, current: FarmState): Promise<FarmState> => {
       const hasBindings = Object.values(current.boundSlots).some(Boolean);
@@ -140,13 +158,29 @@ export function PointsHall({ locale }: { locale: string }) {
   };
 
   const handleUnlock = async (slotIndex: number) => {
-    if (!address || !state) return;
+    if (!address) return;
     setActionError(null);
+
+    const fresh = await refreshFromServer();
+    const current = fresh ?? state;
+    if (!current) return;
+
     const cost = SLOT_UNLOCK_COSTS[slotIndex] ?? 0;
-    if (state.points < cost) {
-      setActionError(t("errInsufficientPoints", { need: cost, have: Math.floor(state.points) }));
+    const balance = Math.floor(current.points * 100) / 100;
+
+    if (slotIndex !== current.unlockedSlots + 1) {
+      setActionError(
+        t("errUnlockOrderDetail", {
+          slot: String(current.unlockedSlots + 1).padStart(2, "0"),
+        }),
+      );
       return;
     }
+    if (balance < cost) {
+      setActionError(t("errInsufficientPoints", { need: cost, have: Math.floor(balance) }));
+      return;
+    }
+
     const result = await unlockSlotApi(address, slotIndex, sign);
     if ("state" in result) {
       applyState(address, result.state);
@@ -156,12 +190,25 @@ export function PointsHall({ locale }: { locale: string }) {
       setActionError(t("errSignRejected"));
       return;
     }
+    if (result.error === "ALREADY_UNLOCKED" || result.error === "UNLOCK_ORDER") {
+      const synced = await refreshFromServer();
+      const nextSlot = synced?.unlockedSlots ?? result.unlockedSlots ?? current.unlockedSlots;
+      setActionError(
+        t("errUnlockOrderDetail", { slot: String(nextSlot + 1).padStart(2, "0") }),
+      );
+      return;
+    }
     if (result.error === "UNLOCK_FAILED") {
       setActionError(t("errUnlockOrder"));
       return;
     }
     if (result.error === "INSUFFICIENT_POINTS") {
-      setActionError(t("errInsufficientPoints", { need: cost, have: Math.floor(state.points) }));
+      setActionError(
+        t("errInsufficientPoints", {
+          need: result.need ?? cost,
+          have: Math.floor(result.have ?? balance),
+        }),
+      );
       return;
     }
     setActionError(t("actionFailed"));
@@ -213,6 +260,10 @@ export function PointsHall({ locale }: { locale: string }) {
     if (state.boundSlots[index]) return "filled";
     return "empty";
   }
+
+  const nextUnlockSlot = state ? state.unlockedSlots + 1 : 3;
+  const nextUnlockCost = SLOT_UNLOCK_COSTS[nextUnlockSlot] ?? 0;
+  const pointBalance = state ? Math.floor(state.points) : 0;
 
   return (
     <div className="space-y-8">
@@ -285,15 +336,34 @@ export function PointsHall({ locale }: { locale: string }) {
       </section>
 
       <section>
-        <div className="mb-4 flex items-end justify-between gap-4">
+        <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
           <div>
             <h2 className="text-lg font-bold">{t("gridTitle")}</h2>
             <p className="text-sm text-white/45">{t("gridHint")}</p>
+            {ready && nextUnlockSlot <= HALL_SLOT_COUNT && (
+              <p className="mt-1 text-xs text-gold/80">
+                {t("nextUnlockBanner", {
+                  slot: String(nextUnlockSlot).padStart(2, "0"),
+                  cost: nextUnlockCost,
+                  balance: pointBalance,
+                })}
+              </p>
+            )}
           </div>
-          <p className="shrink-0 font-mono text-xs text-white/35">
-            {ready ? `${state.unlockedSlots}/${HALL_SLOT_COUNT}` : `2/${HALL_SLOT_COUNT}`}{" "}
-            {t("unlocked")}
-          </p>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              disabled={!address}
+              onClick={() => void refreshFromServer()}
+              className="rounded border border-white/15 px-2 py-1 text-[10px] text-white/50 hover:border-white/30"
+            >
+              {t("refresh")}
+            </button>
+            <p className="font-mono text-xs text-white/35">
+              {ready ? `${state.unlockedSlots}/${HALL_SLOT_COUNT}` : `2/${HALL_SLOT_COUNT}`}{" "}
+              {t("unlocked")}
+            </p>
+          </div>
         </div>
 
         <div className="rounded-2xl border border-white/8 bg-surface/40 p-4 sm:p-6">
