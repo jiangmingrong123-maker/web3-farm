@@ -25,6 +25,7 @@
     "loading": "加载中…",
     "tbd": "待定",
     "openInMetaMask": "在 MetaMask 中打开",
+    "openInOkx": "在 OKX 中打开",
     "connectWalletConnect": "WalletConnect",
     "connectFailed": "连接失败，请重试"
   },

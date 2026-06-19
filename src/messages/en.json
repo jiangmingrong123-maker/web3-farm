@@ -25,6 +25,7 @@
     "loading": "Loading…",
     "tbd": "TBD",
     "openInMetaMask": "Open in MetaMask",
+    "openInOkx": "Open in OKX",
     "connectWalletConnect": "WalletConnect",
     "connectFailed": "Connection failed — try again"
   },

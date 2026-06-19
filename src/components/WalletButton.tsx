@@ -5,12 +5,14 @@ import { useLocale, useTranslations } from "next-intl";
 import { useAccount, useConnect, useDisconnect, useSwitchChain } from "wagmi";
 import { mainnet } from "wagmi/chains";
 import {
+  connectorLabel,
+  hasInjectedProvider,
   listConnectOptions,
   metamaskDappUrl,
+  okxDappUrl,
   pickConnectConnector,
 } from "@/lib/web3/connect-wallet";
 import { hasWalletConnect } from "@/lib/web3/config";
-import { isOkxBrowser } from "@/lib/web3/providers";
 
 export function WalletButton() {
   const t = useTranslations("common");
@@ -24,34 +26,28 @@ export function WalletButton() {
   const wrongNetwork = isConnected && chainId !== mainnet.id;
   const options = useMemo(() => listConnectOptions(connectors), [connectors]);
   const primary = useMemo(() => pickConnectConnector(connectors), [connectors]);
-  const needsMetaMaskApp =
-    !primary && typeof window !== "undefined" && !hasWalletConnect;
-
-  const connectorLabel = (id: string, type: string) => {
-    if (type === "walletConnect") return t("connectWalletConnect");
-    if (id === "io.metamask" || type === "injected") return isOkxBrowser() ? "OKX Wallet" : "MetaMask";
-    return id;
-  };
-
-  const handleConnect = (connector: NonNullable<typeof primary>) => {
-    setShowChoices(false);
-    connect({ connector });
-  };
+  const pageUrl = typeof window !== "undefined" ? window.location.href : SITE_FALLBACK;
+  const needsWalletApp =
+    !primary && typeof window !== "undefined" && !hasWalletConnect && !hasInjectedProvider();
 
   if (!isConnected) {
     return (
       <div className="relative">
-        {needsMetaMaskApp ?
-          <a
-            href={
-              typeof window !== "undefined" ?
-                metamaskDappUrl(window.location.href)
-              : "https://metamask.io/download/"
-            }
-            className="inline-block rounded-full bg-gold px-5 py-2 text-sm font-bold text-ink transition hover:brightness-110"
-          >
-            {t("openInMetaMask")}
-          </a>
+        {needsWalletApp ?
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <a
+              href={okxDappUrl(pageUrl)}
+              className="rounded-full border border-white/20 px-4 py-2 text-xs font-semibold text-white/90 hover:border-white/35"
+            >
+              {t("openInOkx")}
+            </a>
+            <a
+              href={metamaskDappUrl(pageUrl)}
+              className="rounded-full bg-gold px-4 py-2 text-xs font-bold text-ink hover:brightness-110"
+            >
+              {t("openInMetaMask")}
+            </a>
+          </div>
         : (
           <button
             type="button"
@@ -62,7 +58,8 @@ export function WalletButton() {
                 setShowChoices((v) => !v);
                 return;
               }
-              handleConnect(primary);
+              setShowChoices(false);
+              connect({ connector: primary });
             }}
             className="rounded-full bg-gold px-5 py-2 text-sm font-bold text-ink transition hover:brightness-110 disabled:opacity-50"
           >
@@ -77,10 +74,13 @@ export function WalletButton() {
                 key={connector.uid}
                 type="button"
                 disabled={isPending}
-                onClick={() => handleConnect(connector)}
+                onClick={() => {
+                  setShowChoices(false);
+                  connect({ connector });
+                }}
                 className="block w-full rounded-lg px-3 py-2 text-left text-sm text-white/90 hover:bg-white/10"
               >
-                {connectorLabel(connector.id, connector.type)}
+                {connectorLabel(connector)}
               </button>
             ))}
           </div>
@@ -124,3 +124,5 @@ export function WalletButton() {
     </div>
   );
 }
+
+const SITE_FALLBACK = "https://web3-farm.pages.dev/zh/farm/";

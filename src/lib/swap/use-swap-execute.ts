@@ -79,7 +79,7 @@ export function useSwapExecute(
         return;
       }
       const fee = await chargeSwapFeeApi(address, room.id, (message) =>
-        signMessageAsync({ message }),
+        signMessageAsync({ message, account: address }),
       );
       if (!fee.ok) {
         setError(fee.error === "INSUFFICIENT_POINTS" ? "INSUFFICIENT_POINTS" : "TX_FAILED");

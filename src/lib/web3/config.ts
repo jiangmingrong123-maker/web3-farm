@@ -1,6 +1,10 @@
-import { createConfig, http, injected } from "wagmi";
+import { createConfig, http } from "wagmi";
 import { walletConnect } from "@/lib/web3/wagmi-connectors-shim";
 import { mainnet } from "wagmi/chains";
+import {
+  NAMED_WALLET_CONNECTORS,
+  genericInjectedConnector,
+} from "@/lib/web3/connectors-list";
 
 const MAINNET_RPC =
   process.env.NEXT_PUBLIC_ETH_RPC_URL ?? "https://ethereum.publicnode.com";
@@ -10,7 +14,8 @@ const SITE_URL =
   process.env.NEXT_PUBLIC_SITE_URL?.trim() ?? "https://web3-farm.pages.dev";
 
 const connectors = [
-  injected({ shimDisconnect: true }),
+  ...NAMED_WALLET_CONNECTORS,
+  genericInjectedConnector,
   ...(WC_PROJECT_ID ?
     [
       walletConnect({
