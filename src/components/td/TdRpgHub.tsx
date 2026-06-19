@@ -12,21 +12,29 @@ import {
   type UpgradeKind,
 } from "@/lib/td/rpg-storage";
 import { TdEquipPanel } from "@/components/td/TdEquipPanel";
+import type { HeroAvatar } from "@/lib/td/hero-avatar";
 
 type Props = {
   save: HeroSave;
   gold: number;
   locale: string;
+  avatar: HeroAvatar;
   onUpgrade: (kind: UpgradeKind) => void;
 };
 
-export function TdRpgHub({ save, gold, locale, onUpgrade }: Props) {
+export function TdRpgHub({ save, gold, locale, avatar, onUpgrade }: Props) {
   const t = useTranslations("td");
   const companions = activeCompanions(save);
 
   return (
     <div className="space-y-4">
-      <TdEquipPanel save={save} gold={gold} locale={locale} onUpgrade={onUpgrade} />
+      <TdEquipPanel
+        save={save}
+        gold={gold}
+        locale={locale}
+        avatar={avatar}
+        onUpgrade={onUpgrade}
+      />
 
       <section className="rounded-xl border border-white/10 bg-surface p-4">
         <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-white/40">

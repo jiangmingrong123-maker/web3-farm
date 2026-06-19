@@ -1,8 +1,8 @@
 "use client";
 
 import { useTranslations } from "next-intl";
+import { TdHeroPortrait } from "@/components/td/TdHeroPortrait";
 import {
-  EQUIP_SLOTS,
   equipBonus,
   equipDisplayName,
   heroCombatStats,
@@ -10,25 +10,27 @@ import {
   type EquipSlot,
   type HeroSave,
 } from "@/config/td/rpg";
+import type { HeroAvatar } from "@/lib/td/hero-avatar";
 import { upgradeCost, type UpgradeKind } from "@/lib/td/rpg-storage";
+
+const SLOT_POS: { slot: EquipSlot; className: string }[] = [
+  { slot: "hat", className: "top-0 left-1/2 -translate-x-1/2" },
+  { slot: "weapon", className: "top-[68px] right-0" },
+  { slot: "bracelet", className: "top-[136px] left-0" },
+  { slot: "ring", className: "top-[136px] right-0" },
+  { slot: "clothes", className: "bottom-[52px] left-1/2 -translate-x-1/2" },
+  { slot: "pants", className: "bottom-0 left-1/2 -translate-x-1/2" },
+];
 
 type Props = {
   save: HeroSave;
   gold: number;
   locale: string;
+  avatar: HeroAvatar;
   onUpgrade: (kind: UpgradeKind) => void;
 };
 
-const SLOT_LAYOUT: { slot: EquipSlot; grid: string }[] = [
-  { slot: "hat", grid: "col-start-2 row-start-1" },
-  { slot: "bracelet", grid: "col-start-1 row-start-2" },
-  { slot: "weapon", grid: "col-start-3 row-start-2" },
-  { slot: "clothes", grid: "col-start-2 row-start-3" },
-  { slot: "pants", grid: "col-start-2 row-start-4" },
-  { slot: "ring", grid: "col-start-2 row-start-5" },
-];
-
-export function TdEquipPanel({ save, gold, locale, onUpgrade }: Props) {
+export function TdEquipPanel({ save, gold, locale, avatar, onUpgrade }: Props) {
   const t = useTranslations("td");
   const stats = heroCombatStats(save);
   const equipCap = maxEquipTierForHero(save.level);
@@ -38,13 +40,17 @@ export function TdEquipPanel({ save, gold, locale, onUpgrade }: Props) {
       <h2 className="mb-1 text-sm font-bold text-gold">{t("heroTitle")}</h2>
       <p className="mb-3 text-xs text-white/45">{t("heroHint")}</p>
 
-      <div className="grid gap-4 lg:grid-cols-[1fr_auto]">
-        <div className="grid grid-cols-3 grid-rows-5 gap-2 max-w-xs mx-auto lg:mx-0">
-          {SLOT_LAYOUT.map(({ slot, grid }) => (
-            <EquipSlotCard
+      <div className="mx-auto max-w-md space-y-4">
+        <div className="relative mx-auto h-[340px] w-[280px] rounded-xl border border-emerald-800/50 bg-gradient-to-b from-emerald-950/50 via-emerald-950/20 to-black/60 p-2 shadow-[inset_0_0_40px_rgba(16,80,60,0.25)]">
+          <div className="absolute left-1/2 top-[44px] z-0 h-[230px] w-[150px] -translate-x-1/2">
+            <TdHeroPortrait avatar={avatar} level={save.level} />
+          </div>
+
+          {SLOT_POS.map(({ slot, className }) => (
+            <EquipSlotBox
               key={slot}
-              className={grid}
               slot={slot}
+              className={`absolute z-10 w-[78px] ${className}`}
               save={save}
               gold={gold}
               cap={equipCap}
@@ -52,22 +58,18 @@ export function TdEquipPanel({ save, gold, locale, onUpgrade }: Props) {
               onUpgrade={onUpgrade}
             />
           ))}
-          <div className="col-start-2 row-start-2 flex flex-col items-center justify-center rounded-lg border-2 border-gold/40 bg-black/30 px-2 py-3">
-            <span className="text-lg font-bold text-gold">Lv.{save.level}</span>
-            <span className="text-[10px] text-white/40">{t("heroLabel")}</span>
-          </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm sm:grid-cols-3">
+        <div className="grid grid-cols-3 gap-2 text-sm sm:grid-cols-5">
           <StatChip label="HP" value={stats.maxHp} />
           <StatChip label={t("statAtkShort")} value={stats.atk} />
           <StatChip label={t("statDefShort")} value={stats.def} />
           <StatChip label={t("statCrit")} value={`${stats.crit}%`} />
           <StatChip label={t("statAtkSpd")} value={`${stats.atkSpd}%`} />
-          <span className="col-span-full text-[11px] text-white/35">
-            {t("equipCapHint", { cap: equipCap })}
-          </span>
         </div>
+        <p className="text-center text-[11px] text-white/35">
+          {t("equipCapHint", { cap: equipCap })}
+        </p>
       </div>
     </section>
   );
@@ -75,14 +77,14 @@ export function TdEquipPanel({ save, gold, locale, onUpgrade }: Props) {
 
 function StatChip({ label, value }: { label: string; value: string | number }) {
   return (
-    <div className="rounded border border-white/10 px-2 py-1">
+    <div className="rounded border border-white/10 bg-black/20 px-2 py-1.5 text-center">
       <span className="text-[10px] text-white/40">{label}</span>
       <p className="font-semibold text-white/90">{value}</p>
     </div>
   );
 }
 
-function EquipSlotCard({
+function EquipSlotBox({
   slot,
   save,
   gold,
@@ -106,7 +108,7 @@ function EquipSlotCard({
   const cost = upgradeCost(save, { type: "equip", slot });
   const atCap = tier >= cap;
 
-  const bonusText = [
+  const bonusLine = [
     bonus.atk ? `+${bonus.atk}${t("statAtkShort")}` : "",
     bonus.def ? `+${bonus.def}${t("statDefShort")}` : "",
     bonus.hp ? `+${bonus.hp}HP` : "",
@@ -118,26 +120,29 @@ function EquipSlotCard({
 
   return (
     <div
-      className={`flex flex-col rounded-lg border border-white/15 bg-surface/80 p-2 ${className}`}
+      className={`flex flex-col rounded-md border border-stone-600/80 bg-stone-900/90 p-1.5 shadow-md ${className}`}
+      title={`${name}\n${bonusLine}`}
     >
-      <span className="text-[9px] uppercase tracking-wide text-white/35">
-        {EQUIP_SLOTS.includes(slot) ? t(`equip_${slot}`) : slot}
+      <span className="text-center text-[8px] uppercase tracking-wider text-emerald-400/70">
+        {t(`equip_${slot}`)}
       </span>
-      <span className="mt-0.5 text-[11px] font-medium leading-tight text-white/85">
+      <span className="mt-0.5 line-clamp-2 min-h-[26px] text-center text-[9px] font-medium leading-tight text-stone-100">
         {name}
       </span>
-      <span className="text-[9px] text-gold/80">T{tier}</span>
-      {bonusText && (
-        <span className="mt-1 text-[9px] leading-snug text-white/45">{bonusText}</span>
+      <span className="text-center text-[8px] font-bold text-gold">T{tier}</span>
+      {bonusLine && (
+        <span className="mt-0.5 line-clamp-2 text-center text-[7px] leading-tight text-white/45">
+          {bonusLine}
+        </span>
       )}
       {cost != null && (
         <button
           type="button"
           disabled={gold < cost}
           onClick={() => onUpgrade({ type: "equip", slot })}
-          className="mt-auto pt-1 text-left text-[9px] text-gold disabled:opacity-40"
+          className="mt-1 rounded border border-gold/25 bg-gold/10 py-0.5 text-[8px] text-gold disabled:opacity-40"
         >
-          {atCap ? t("equipNeedHeroLv") : `${t("upgrade")} · ${cost}G`}
+          {atCap ? "↑Lv" : `${cost}G`}
         </button>
       )}
     </div>

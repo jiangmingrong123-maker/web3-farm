@@ -50,6 +50,11 @@ import {
 } from "@/lib/td/rpg-run-storage";
 import { TdRpgClimb } from "@/components/td/TdRpgClimb";
 import { TdRpgHub } from "@/components/td/TdRpgHub";
+import { fetchFarmStateApi } from "@/lib/farm-api";
+import {
+  resolveHeroAvatar,
+  type HeroAvatar,
+} from "@/lib/td/hero-avatar";
 import { playTdSfx } from "@/lib/td/sfx";
 
 type Screen = "hub" | "shop" | "play";
@@ -82,6 +87,7 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
 
   const [runId, setRunId] = useState<string | null>(null);
   const [heroSave, setHeroSave] = useState<HeroSave>(defaultHeroSave());
+  const [heroAvatar, setHeroAvatar] = useState<HeroAvatar>({ kind: "generic", name: "路人" });
   const [climb, setClimb] = useState<ClimbRunState | null>(null);
   const [settling, setSettling] = useState(false);
   const [autoRunning, setAutoRunning] = useState(false);
@@ -138,6 +144,20 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
   useEffect(() => {
     const wallet = demoMode ? "demo" : address;
     if (wallet) setHeroSave(loadHeroSave(wallet));
+  }, [address, demoMode]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void resolveHeroAvatar(
+      demoMode ? "demo" : address,
+      demoMode,
+      fetchFarmStateApi,
+    ).then((avatar) => {
+      if (!cancelled) setHeroAvatar(avatar);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [address, demoMode]);
 
   useEffect(() => {
@@ -618,7 +638,13 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
             </p>
           )}
 
-          <TdRpgHub save={heroSave} gold={profile.gold} locale={locale} onUpgrade={handleUpgrade} />
+          <TdRpgHub
+            save={heroSave}
+            gold={profile.gold}
+            locale={locale}
+            avatar={heroAvatar}
+            onUpgrade={handleUpgrade}
+          />
 
           <div className="flex flex-wrap gap-3">
             <button
