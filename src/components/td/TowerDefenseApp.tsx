@@ -84,11 +84,14 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
   const [heroSave, setHeroSave] = useState<HeroSave>(defaultHeroSave());
   const [climb, setClimb] = useState<ClimbRunState | null>(null);
   const [settling, setSettling] = useState(false);
+  const [autoRunning, setAutoRunning] = useState(false);
   const [demoMode, setDemoMode] = useState(false);
   const devDemo = isTdDevDemoEnabled();
   const buffsRef = useRef<string[]>([]);
+  const heroSaveRef = useRef(heroSave);
   const finishingRef = useRef(false);
   const finishTokenRef = useRef<string | null>(null);
+  const autoClimbRef = useRef(false);
 
   const [screen, setScreen] = useState<Screen>("hub");
 
@@ -136,6 +139,10 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
     const wallet = demoMode ? "demo" : address;
     if (wallet) setHeroSave(loadHeroSave(wallet));
   }, [address, demoMode]);
+
+  useEffect(() => {
+    heroSaveRef.current = heroSave;
+  }, [heroSave]);
 
   const walletKey = demoMode ? "demo" : address ?? "";
 
@@ -257,6 +264,41 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
     [demoMode, persistActiveRun, profile?.activeRunId, runId, settleRun, t, walletKey],
   );
 
+  const runAutoClimbLoop = useCallback(
+    async (initial: ClimbRunState) => {
+      if (autoClimbRef.current || initial.done) return;
+      autoClimbRef.current = true;
+      setAutoRunning(true);
+      let state = initial;
+
+      while (!state.done) {
+        setClimb({ ...state, activeFloor: state.floor + 1 });
+        await new Promise((r) => setTimeout(r, 320));
+        state = fightNextFloor(state, heroSaveRef.current, buffsRef.current, locale);
+        setClimb(state);
+        const id = runId ?? profile?.activeRunId;
+        const token =
+          finishTokenRef.current ?? loadPendingRun(walletKey)?.finishToken ?? "";
+        if (id && token) persistActiveRun(id, token, state);
+        if (!state.done) await new Promise((r) => setTimeout(r, 180));
+      }
+
+      setAutoRunning(false);
+      autoClimbRef.current = false;
+      if (state.victory) playTdSfx("victory");
+      else playTdSfx("defeat");
+      await autoSettleAndReturn(state);
+    },
+    [
+      autoSettleAndReturn,
+      locale,
+      persistActiveRun,
+      profile?.activeRunId,
+      runId,
+      walletKey,
+    ],
+  );
+
   useEffect(() => {
     if (demoMode || !address || !profile?.activeRunId) return;
     const pending = loadPendingRun(address);
@@ -268,10 +310,11 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
 
     if (pending.climb.done) {
       void autoSettleAndReturn(pending.climb);
-    } else if (screen === "hub") {
+    } else {
       setScreen("play");
+      void runAutoClimbLoop(pending.climb);
     }
-  }, [address, autoSettleAndReturn, demoMode, profile?.activeRunId, screen]);
+  }, [address, autoSettleAndReturn, demoMode, profile?.activeRunId, runAutoClimbLoop, screen]);
 
   const handleRefill = async () => {
     if (!profile) return;
@@ -360,6 +403,7 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
       persistActiveRun(res.runId, "demo", climbState);
       setScreen("play");
       setResultMsg(null);
+      void runAutoClimbLoop(climbState);
       return;
     }
     if (!address) return;
@@ -381,23 +425,7 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
     persistActiveRun(res.runId, res.finishToken, climbState);
     setScreen("play");
     setResultMsg(null);
-  };
-
-  const handleNextFloor = () => {
-    if (!climb || settling) return;
-    playTdSfx("wave_start");
-    const next = fightNextFloor(climb, heroSave, buffsRef.current, locale);
-    setClimb(next);
-    const id = runId ?? profile?.activeRunId;
-    const token = finishTokenRef.current ?? loadPendingRun(walletKey)?.finishToken ?? "";
-    if (id && token) persistActiveRun(id, token, next);
-    if (next.done) {
-      if (next.victory) playTdSfx("victory");
-      else playTdSfx("defeat");
-      void autoSettleAndReturn(next);
-    } else {
-      playTdSfx("wave_clear");
-    }
+    void runAutoClimbLoop(climbState);
   };
 
   const handleClimbFinish = () => {
@@ -539,7 +567,7 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
               label={t("stamina")}
               value={profile.stamina}
             />
-            <Stat label={t("farmPoints")} value={farmPoints} />
+            <Stat label={t("farmPoints")} value={Math.floor(farmPoints)} />
             <Stat label={t("stage")} value={`${STAGE1_NAME}`} />
           </div>
 
@@ -590,7 +618,7 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
             </p>
           )}
 
-          <TdRpgHub save={heroSave} gold={profile.gold} onUpgrade={handleUpgrade} />
+          <TdRpgHub save={heroSave} gold={profile.gold} locale={locale} onUpgrade={handleUpgrade} />
 
           <div className="flex flex-wrap gap-3">
             <button
@@ -671,7 +699,7 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
         <TdRpgClimb
           climb={climb}
           settling={settling}
-          onNextFloor={handleNextFloor}
+          autoRunning={autoRunning}
           onFinish={handleClimbFinish}
         />
       )}

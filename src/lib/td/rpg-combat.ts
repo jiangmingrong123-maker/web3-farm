@@ -14,6 +14,8 @@ export type ClimbRunState = {
   log: string[];
   done: boolean;
   victory: boolean;
+  /** 自动爬塔时正在挑战的层 */
+  activeFloor?: number;
 };
 
 export function createClimbRun(): ClimbRunState {
@@ -31,7 +33,15 @@ function pickTarget(enemies: FloorEnemy[]): FloorEnemy | null {
   return enemies.reduce((a, b) => (a.hp <= b.hp ? a : b));
 }
 
-/** 挑战下一层，返回完整战报 */
+function rollCrit(critPct: number): boolean {
+  return Math.random() * 100 < critPct;
+}
+
+function heroHitsPerRound(atkSpd: number): number {
+  return 1 + Math.floor(atkSpd / 25);
+}
+
+/** 挑战下一层；战败层或通关层附带详细战报 */
 export function fightNextFloor(
   run: ClimbRunState,
   save: HeroSave,
@@ -44,37 +54,27 @@ export function fightNextFloor(
   const lines = [...run.log];
   const stats = heroCombatStats(save);
   let heroHp = stats.maxHp;
-  let heroMax = stats.maxHp;
   let heroAtk = stats.atk;
   const heroDef = stats.def;
+  const heroCrit = stats.crit;
+  const heroAtkSpd = stats.atkSpd;
 
   if (buffs.includes("pack")) {
     heroAtk += 2;
-    heroMax += 10;
     heroHp += 10;
   }
 
   const companions = activeCompanions(save);
   let enemies = floorEnemies(floor).map((e) => ({ ...e }));
   let shieldUsed = false;
+  const detail: string[] = [];
+  const push = (line: string) => detail.push(line);
 
-  lines.push(
+  push(
     zh
-      ? `\n▶ 第 ${floor} 层 · 敌人 ${enemies.length} 名`
-      : `\n> Floor ${floor} · ${enemies.length} enemies`,
+      ? `▶ 第 ${floor} 层 · 敌人 ${enemies.length} 名`
+      : `> Floor ${floor} · ${enemies.length} enemies`,
   );
-  lines.push(
-    zh
-      ? `【我方】主角 Lv.${save.level} HP ${heroHp}/${heroMax} 攻 ${heroAtk} 防 ${heroDef}`
-      : `[Party] Hero Lv.${save.level} HP ${heroHp}/${heroMax} ATK ${heroAtk} DEF ${heroDef}`,
-  );
-  if (companions.length > 0) {
-    lines.push(
-      zh
-        ? `【配角】${companions.map((k) => `${k} Lv.${save.companionLevel[k]}`).join(" · ")}`
-        : `[Pets] ${companions.map((k) => `${k} Lv.${save.companionLevel[k]}`).join(" · ")}`,
-    );
-  }
 
   let round = 0;
   const maxRounds = 60;
@@ -82,20 +82,23 @@ export function fightNextFloor(
 
   while (enemies.length > 0 && heroHp > 0 && round < maxRounds) {
     round += 1;
-    lines.push(zh ? `— 回合 ${round} —` : `— Round ${round} —`);
+    push(zh ? `— 回合 ${round} —` : `— Round ${round} —`);
 
-    // 主角攻击
-    const target = pickTarget(enemies)!;
-    let dmg = Math.max(1, heroAtk - Math.floor(target.atk * 0.1));
-    if (exposed.has(target.id)) dmg = Math.round(dmg * 1.3 * 10) / 10;
-    target.hp = Math.round((target.hp - dmg) * 10) / 10;
-    lines.push(
-      zh
-        ? `主角 → ${target.name}，造成 ${dmg} 伤害，剩余 ${Math.max(0, target.hp)} HP`
-        : `Hero → ${target.name}: ${dmg} dmg, ${Math.max(0, target.hp)} HP left`,
-    );
+    const hits = heroHitsPerRound(heroAtkSpd);
+    for (let h = 0; h < hits && enemies.length > 0; h++) {
+      const target = pickTarget(enemies)!;
+      let dmg = Math.max(1, heroAtk - Math.floor(target.atk * 0.08));
+      if (exposed.has(target.id)) dmg = Math.round(dmg * 1.3 * 10) / 10;
+      const crit = rollCrit(heroCrit);
+      if (crit) dmg = Math.round(dmg * 2 * 10) / 10;
+      target.hp = Math.round((target.hp - dmg) * 10) / 10;
+      push(
+        zh
+          ? `主角 → ${target.name}，${dmg} 伤害${crit ? "（暴击）" : ""}`
+          : `Hero → ${target.name}: ${dmg}${crit ? " CRIT" : ""}`,
+      );
+    }
 
-    // 配角
     for (const kind of companions) {
       if (enemies.length === 0) break;
       const petTarget = pickTarget(enemies)!;
@@ -103,60 +106,55 @@ export function fightNextFloor(
       if (kind === "群") petDmg = Math.round(petDmg * 1.15);
       if (exposed.has(petTarget.id)) petDmg = Math.round(petDmg * 1.3 * 10) / 10;
       petTarget.hp = Math.round((petTarget.hp - petDmg) * 10) / 10;
-      let extra = "";
-      if (kind === "编") {
-        exposed.add(petTarget.id);
-        extra = zh ? "，标记破绽" : ", exposed";
-      }
-      if (kind === "粉") extra = zh ? "，减速" : ", slow";
-      lines.push(
-        zh
-          ? `配角·${kind} → ${petTarget.name}，${petDmg} 伤害${extra}`
-          : `Pet ${kind} → ${petTarget.name}: ${petDmg}${extra}`,
-      );
+      if (kind === "编") exposed.add(petTarget.id);
+      push(zh ? `配角·${kind} → ${petTarget.name}，${petDmg} 伤害` : `Pet ${kind} → ${petTarget.name}: ${petDmg}`);
     }
 
     enemies = enemies.filter((e) => {
       if (e.hp <= 0) {
-        lines.push(zh ? `${e.name} 被击败` : `${e.name} defeated`);
+        push(zh ? `${e.name} 被击败` : `${e.name} defeated`);
         return false;
       }
       return true;
     });
     if (enemies.length === 0) break;
 
-    // 敌人反击
     for (const enemy of enemies) {
       if (heroHp <= 0) break;
-      const raw = enemy.atk;
-      const taken = Math.max(1, raw - heroDef);
+      const taken = Math.max(1, enemy.atk - heroDef);
       if (buffs.includes("shield") && !shieldUsed) {
         shieldUsed = true;
-        lines.push(zh ? "【烂片免疫】抵挡一次伤害" : "[Shield] blocked hit");
+        push(zh ? "【烂片免疫】抵挡一次伤害" : "[Shield] blocked");
         continue;
       }
       heroHp = Math.round((heroHp - taken) * 10) / 10;
-      lines.push(
+      push(
         zh
-          ? `${enemy.name} → 主角，造成 ${taken} 伤害，剩余 ${Math.max(0, heroHp)} HP`
-          : `${enemy.name} → Hero: ${taken} dmg, ${Math.max(0, heroHp)} HP left`,
+          ? `${enemy.name} → 主角，${taken} 伤害，剩 ${Math.max(0, heroHp)} HP`
+          : `${enemy.name} → Hero: ${taken}, ${Math.max(0, heroHp)} HP`,
       );
     }
   }
 
   const cleared = enemies.length === 0 && heroHp > 0;
+  const victory = cleared && floor >= run.maxFloor;
+  const done = !cleared || victory;
+
   if (cleared) {
-    lines.push(zh ? `【过关】第 ${floor} 层通过` : `[Clear] floor ${floor}`);
+    lines.push(zh ? `✓ 第 ${floor} 层通过` : `✓ Cleared floor ${floor}`);
   } else {
     lines.push(
       zh
-        ? `【战败】第 ${floor} 层失败，主角 HP ${Math.max(0, heroHp)}`
-        : `[Fail] floor ${floor}, hero HP ${Math.max(0, heroHp)}`,
+        ? `✗ 第 ${floor} 层战败（最高 ${floor - 1} 层）`
+        : `✗ Failed floor ${floor} (best ${floor - 1})`,
     );
+    lines.push(...detail);
   }
 
-  const victory = cleared && floor >= run.maxFloor;
-  const done = !cleared || victory;
+  if (victory) {
+    lines.push(zh ? "【通关】红毯塔顶！" : "[Victory] Tower cleared!");
+    lines.push(...detail);
+  }
 
   return {
     floor: cleared ? floor : run.floor,
@@ -164,6 +162,7 @@ export function fightNextFloor(
     log: lines,
     done,
     victory,
+    activeFloor: undefined,
   };
 }
 
