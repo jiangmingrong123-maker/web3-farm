@@ -97,7 +97,11 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
   const heroSaveRef = useRef(heroSave);
   const finishingRef = useRef(false);
   const finishTokenRef = useRef<string | null>(null);
+  const runIdRef = useRef<string | null>(null);
+  const activeRunIdRef = useRef<string | null>(null);
   const autoClimbRef = useRef(false);
+  const restoredRunRef = useRef<string | null>(null);
+  const settleGenRef = useRef(0);
 
   const [screen, setScreen] = useState<Screen>("hub");
 
@@ -164,6 +168,14 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
     heroSaveRef.current = heroSave;
   }, [heroSave]);
 
+  useEffect(() => {
+    runIdRef.current = runId;
+  }, [runId]);
+
+  useEffect(() => {
+    activeRunIdRef.current = profile?.activeRunId ?? null;
+  }, [profile?.activeRunId]);
+
   const walletKey = demoMode ? "demo" : address ?? "";
 
   const persistActiveRun = useCallback(
@@ -197,13 +209,17 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
       cleared: boolean,
       wavesReached: number,
       activeId?: string | null,
+      gen?: number,
     ): Promise<boolean> => {
-      const id = activeId ?? runId ?? profile?.activeRunId;
-      if (!id || !profile) return false;
+      const id = activeId ?? runIdRef.current ?? activeRunIdRef.current;
+      const currentProfile = profile;
+      if (!id || !currentProfile) return false;
+      if (gen != null && gen !== settleGenRef.current) return false;
 
       if (demoMode) {
-        const res = demoFinish(profile, cleared, wavesReached, id);
+        const res = demoFinish(currentProfile, cleared, wavesReached, id);
         if (!res) return false;
+        if (gen != null && gen !== settleGenRef.current) return false;
         setProfile(res.profile);
         setRefillCost(demoRefillCost(res.profile));
         setGoldExchangeCost(demoGoldExchangeCost(res.profile));
@@ -217,6 +233,7 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
         finishTokenRef.current ?? loadPendingRun(walletKey)?.finishToken ?? undefined;
 
       for (let attempt = 0; attempt < 3; attempt++) {
+        if (gen != null && gen !== settleGenRef.current) return false;
         const res = await finishTdRunApi(address, sign, {
           runId: id,
           cleared,
@@ -224,6 +241,7 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
           finishToken: token,
         });
         if (res) {
+          if (gen != null && gen !== settleGenRef.current) return false;
           finishTokenRef.current = null;
           clearPendingRun(walletKey);
           setProfile(res.profile);
@@ -236,6 +254,7 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
         }
       }
 
+      if (gen != null && gen !== settleGenRef.current) return false;
       const data = await fetchTdProfileApi(address);
       if (data && !data.profile.activeRunId) {
         finishTokenRef.current = null;
@@ -251,7 +270,6 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
       demoMode,
       profile,
       refresh,
-      runId,
       showSettleMessage,
       sign,
       walletKey,
@@ -259,44 +277,54 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
   );
 
   const autoSettleAndReturn = useCallback(
-    async (climbState: ClimbRunState) => {
+    async (climbState: ClimbRunState, gen: number) => {
       if (finishingRef.current) return;
+      if (gen !== settleGenRef.current) return;
       finishingRef.current = true;
       setSettling(true);
       setError(null);
-      const id = runId ?? profile?.activeRunId;
+      const id = runIdRef.current ?? activeRunIdRef.current;
       const token = finishTokenRef.current ?? loadPendingRun(walletKey)?.finishToken ?? "";
       if (id && token) {
         persistActiveRun(id, token, climbState);
       }
       const cleared = climbState.victory;
       const waves = cleared ? climbState.maxFloor : floorsCleared(climbState);
-      const ok = await settleRun(cleared, waves);
+      const ok = await settleRun(cleared, waves, id, gen);
+      if (gen !== settleGenRef.current) return;
       setSettling(false);
       setRunId(null);
       setClimb(null);
       setScreen("hub");
+      autoClimbRef.current = false;
       if (!ok && !demoMode) {
         finishingRef.current = false;
         setError(t("settleRetryHint"));
       }
     },
-    [demoMode, persistActiveRun, profile?.activeRunId, runId, settleRun, t, walletKey],
+    [demoMode, persistActiveRun, settleRun, t, walletKey],
   );
 
   const runAutoClimbLoop = useCallback(
-    async (initial: ClimbRunState) => {
+    async (initial: ClimbRunState, gen: number) => {
       if (autoClimbRef.current || initial.done) return;
+      if (gen !== settleGenRef.current) return;
       autoClimbRef.current = true;
       setAutoRunning(true);
+      setError(null);
       let state = initial;
 
       while (!state.done) {
+        if (gen !== settleGenRef.current) {
+          autoClimbRef.current = false;
+          setAutoRunning(false);
+          return;
+        }
         setClimb({ ...state, activeFloor: state.floor + 1 });
         await new Promise((r) => setTimeout(r, 320));
         state = fightNextFloor(state, heroSaveRef.current, buffsRef.current, locale);
         setClimb(state);
-        const id = runId ?? profile?.activeRunId;
+        const id = runIdRef.current ?? activeRunIdRef.current;
         const token =
           finishTokenRef.current ?? loadPendingRun(walletKey)?.finishToken ?? "";
         if (id && token) persistActiveRun(id, token, state);
@@ -304,37 +332,46 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
       }
 
       setAutoRunning(false);
-      autoClimbRef.current = false;
+      if (gen !== settleGenRef.current) {
+        autoClimbRef.current = false;
+        return;
+      }
       if (state.victory) playTdSfx("victory");
       else playTdSfx("defeat");
-      await autoSettleAndReturn(state);
+      await autoSettleAndReturn(state, gen);
     },
-    [
-      autoSettleAndReturn,
-      locale,
-      persistActiveRun,
-      profile?.activeRunId,
-      runId,
-      walletKey,
-    ],
+    [autoSettleAndReturn, locale, persistActiveRun, walletKey],
   );
 
   useEffect(() => {
     if (demoMode || !address || !profile?.activeRunId) return;
-    const pending = loadPendingRun(address);
-    if (!pending || pending.runId !== profile.activeRunId) return;
+    const activeId = profile.activeRunId;
+    if (restoredRunRef.current === activeId) return;
+    if (autoClimbRef.current) return;
 
+    const pending = loadPendingRun(address);
+    if (!pending || pending.runId !== activeId) return;
+
+    restoredRunRef.current = activeId;
     finishTokenRef.current = pending.finishToken;
+    runIdRef.current = pending.runId;
     setRunId(pending.runId);
     setClimb(pending.climb);
 
+    const gen = settleGenRef.current;
     if (pending.climb.done) {
-      void autoSettleAndReturn(pending.climb);
+      void autoSettleAndReturn(pending.climb, gen);
     } else {
       setScreen("play");
-      void runAutoClimbLoop(pending.climb);
+      void runAutoClimbLoop(pending.climb, gen);
     }
-  }, [address, autoSettleAndReturn, demoMode, profile?.activeRunId, runAutoClimbLoop, screen]);
+  }, [
+    address,
+    autoSettleAndReturn,
+    demoMode,
+    profile?.activeRunId,
+    runAutoClimbLoop,
+  ]);
 
   const handleRefill = async () => {
     if (!profile) return;
@@ -393,16 +430,40 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
     refresh();
   };
 
+  const beginRunSession = (id: string, token: string, climbState: ClimbRunState) => {
+    settleGenRef.current += 1;
+    const gen = settleGenRef.current;
+    restoredRunRef.current = id;
+    finishingRef.current = false;
+    autoClimbRef.current = false;
+    finishTokenRef.current = token;
+    runIdRef.current = id;
+    activeRunIdRef.current = id;
+    clearPendingRun(walletKey);
+    setRunId(id);
+    setClimb(climbState);
+    persistActiveRun(id, token, climbState);
+    setScreen("play");
+    setResultMsg(null);
+    setError(null);
+    void runAutoClimbLoop(climbState, gen);
+    return gen;
+  };
+
   const handleForfeit = async (wavesReached: number) => {
+    const gen = settleGenRef.current;
     setSettling(true);
     setError(null);
-    const ok = await settleRun(false, wavesReached);
+    const ok = await settleRun(false, wavesReached, undefined, gen);
     setSettling(false);
     if (!ok && !demoMode) setError(t("settleRetryHint"));
     finishTokenRef.current = null;
+    runIdRef.current = null;
+    restoredRunRef.current = null;
     setRunId(null);
     setClimb(null);
     setScreen("hub");
+    autoClimbRef.current = false;
     if (ok) clearPendingRun(walletKey);
   };
   const handleStart = async () => {
@@ -415,15 +476,9 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
       }
       setProfile(res.profile);
       buffsRef.current = activeBuffIds(res.profile);
-      finishingRef.current = false;
-      finishTokenRef.current = "demo";
-      setRunId(res.runId);
+      activeRunIdRef.current = res.runId;
       const climbState = createClimbRun();
-      setClimb(climbState);
-      persistActiveRun(res.runId, "demo", climbState);
-      setScreen("play");
-      setResultMsg(null);
-      void runAutoClimbLoop(climbState);
+      beginRunSession(res.runId, "demo", climbState);
       return;
     }
     if (!address) return;
@@ -437,20 +492,13 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
     }
     setProfile(res.profile);
     buffsRef.current = activeBuffIds(res.profile);
-    finishingRef.current = false;
-    finishTokenRef.current = res.finishToken;
-    setRunId(res.runId);
-    const climbState = createClimbRun();
-    setClimb(climbState);
-    persistActiveRun(res.runId, res.finishToken, climbState);
-    setScreen("play");
-    setResultMsg(null);
-    void runAutoClimbLoop(climbState);
+    activeRunIdRef.current = res.runId;
+    beginRunSession(res.runId, res.finishToken, createClimbRun());
   };
 
   const handleClimbFinish = () => {
     if (!climb || settling) return;
-    void autoSettleAndReturn(climb);
+    void autoSettleAndReturn(climb, settleGenRef.current);
   };
 
   const handleUpgrade = (kind: UpgradeKind) => {
@@ -568,7 +616,7 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
         )}
       </div>
 
-      {error && (
+      {error && screen === "hub" && (
         <p className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm text-red-300">
           {error}
         </p>

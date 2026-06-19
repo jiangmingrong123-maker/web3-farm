@@ -70,7 +70,7 @@ interface ActiveRun {
   wallet: string;
   stage: number;
   startedAt: number;
-  finishToken: string;
+  finishToken?: string;
 }
 
 const NO_CACHE = {
@@ -394,7 +394,9 @@ export const onRequest = async (context: {
       return json({ ok: false, error: "INVALID_RUN" }, 400);
     }
 
-    const tokenOk = finishToken.length > 0 && finishToken === run.finishToken;
+    const tokenOk =
+      finishToken.length > 0 &&
+      (finishToken === run.finishToken || !run.finishToken);
     if (!tokenOk) {
       const auth = await requireWalletSignature(
         "td-finish",
