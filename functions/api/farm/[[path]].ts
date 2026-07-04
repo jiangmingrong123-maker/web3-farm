@@ -12,6 +12,7 @@
  */
 
 import { requireWalletSignature, type SignedBody } from "../../lib/farm-sign";
+import { corsPreflight, withCors } from "../../lib/cors";
 
 const RPC_URLS = [
   "https://ethereum.publicnode.com",
@@ -85,10 +86,10 @@ const DAY_MS = 24 * HOUR_MS;
 const memory = new Map<string, FarmState>();
 const feeMemory = new Set<string>();
 
-const NO_CACHE = {
+const NO_CACHE = withCors({
   "Content-Type": "application/json",
   "Cache-Control": "no-store, no-cache, must-revalidate",
-};
+});
 
 function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), { status, headers: NO_CACHE });
@@ -464,6 +465,7 @@ export const onRequest = async (context: {
   params: Record<string, string | string[] | undefined>;
 }) => {
   const { request, env, params } = context;
+  if (request.method === "OPTIONS") return corsPreflight();
   const path = pathSegments(params.path as string | string[] | undefined);
 
   if (path[0] === "admin" && path[1] === "grant" && request.method === "POST") {

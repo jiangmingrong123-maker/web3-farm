@@ -3,8 +3,9 @@ import type { FarmState, RemovedBinding } from "./farm-storage";
 import { verifyNftOwnership } from "./nft/verify";
 import type { Address } from "viem";
 import { pruneBindingsLocally, syncAccrual } from "./farm-storage";
+import { apiRoot } from "./api-origin";
 
-const API = "/api/farm";
+const API = `${apiRoot()}/farm`;
 
 export type FarmSignFn = (message: string) => Promise<`0x${string}`>;
 

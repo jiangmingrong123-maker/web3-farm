@@ -3,6 +3,8 @@
  * POST /api/nft/verify  { contract, tokenId, wallet }
  */
 
+import { corsPreflight, withCors } from "../../lib/cors";
+
 const WHITELIST = ["0xa28d6a8eb65a41f3958f1de62cbfca20b817e66a"];
 const RPC_URLS = [
   "https://ethereum.publicnode.com",
@@ -23,10 +25,10 @@ type VerifyError =
 function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: {
+    headers: withCors({
       "Content-Type": "application/json",
       "Cache-Control": "no-store, no-cache, must-revalidate",
-    },
+    }),
   });
 }
 
@@ -102,13 +104,7 @@ async function ethCall(to: string, data: string): Promise<string> {
 }
 
 export async function onRequestOptions() {
-  return new Response(null, {
-    headers: {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type",
-    },
-  });
+  return corsPreflight();
 }
 
 export async function onRequestPost(context: { request: Request }) {

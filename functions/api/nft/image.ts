@@ -3,6 +3,8 @@
  * Proxies NFT image bytes (OpenSea CDN → Alchemy → metadata/IPFS → SVG fallback).
  */
 
+import { corsPreflight, withCors } from "../../lib/cors";
+
 interface Env {
   ALCHEMY_API_KEY?: string;
   OPENSEA_API_KEY?: string;
@@ -111,11 +113,15 @@ async function fetchImageBytes(
 
 function imageResponse(bytes: ArrayBuffer, type: string): Response {
   return new Response(bytes, {
-    headers: {
+    headers: withCors({
       "Content-Type": type,
       "Cache-Control": "public, max-age=86400",
-    },
+    }),
   });
+}
+
+export async function onRequestOptions() {
+  return corsPreflight();
 }
 
 async function fetchFirstImage(urls: string[]): Promise<Response | null> {
@@ -376,10 +382,10 @@ export async function onRequestGet(context: { request: Request; env: Env }) {
 
   return new Response(msg, {
     status: 404,
-    headers: {
+    headers: withCors({
       "Content-Type": "text/plain; charset=utf-8",
       "X-Alchemy-Configured": hasAlchemy ? "1" : "0",
       "X-Opensea-Configured": openseaKey ? "1" : "0",
-    },
+    }),
   });
 }

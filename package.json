@@ -4,10 +4,12 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:clean": "node -e \"require('fs').rmSync('.next',{recursive:true,force:true})\" && next dev",
     "build": "next build",
     "pages:build": "npx @cloudflare/next-on-pages",
     "start": "next start",
     "lint": "next lint",
+    "test:quant": "node scripts/test-quant.mjs",
     "deploy:swap": "node scripts/deploy-swap.mjs",
     "grant:points": "node scripts/grant-points.mjs"
   },

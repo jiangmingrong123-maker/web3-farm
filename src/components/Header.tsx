@@ -9,6 +9,7 @@ const NAV_LINKS = [
   { href: "/", key: "home" as const },
   { href: "/farm", key: "farm" as const },
   { href: "/td", key: "td" as const },
+  { href: "/quant", key: "quant" as const },
   { href: "/swap", key: "swap" as const },
 ];
 

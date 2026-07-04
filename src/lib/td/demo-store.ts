@@ -2,9 +2,13 @@ import { BUFF_DURATION_MS } from "@/config/td/shop";
 import {
   FAIL_CONSOLATION_GOLD,
   GOLD_EXCHANGE_REWARD,
+  MAP_SWEEP_RUNS_BATCH,
+  MAP_SWEEP_UNLOCK_POINTS,
   STAMINA_MAX,
   STAMINA_PER_RUN,
-  STAMINA_REFILL_AMOUNT,
+  STAMINA_PER_SWEEP_RUN,
+  applyDailyStaminaReset,
+  applyStaminaRefill,
   goldExchangeCost,
   refillPointsCost,
   stageClearGold,
@@ -33,6 +37,19 @@ function dayKey(now = Date.now()): string {
   return new Date(now).toISOString().slice(0, 10);
 }
 
+/** 跨日重置：体力补至 100（已超 100 保留）、计数清零 */
+export function applyDailyProfileReset(profile: TdProfile): TdProfile {
+  const dk = dayKey();
+  if (profile.refillDayKey === dk) return profile;
+  return {
+    ...profile,
+    refillDayKey: dk,
+    refillCountToday: 0,
+    goldExchangeCountToday: 0,
+    stamina: applyDailyStaminaReset(profile.stamina),
+  };
+}
+
 export function defaultDemoProfile(): TdProfile {
   return {
     gold: 200,
@@ -45,6 +62,7 @@ export function defaultDemoProfile(): TdProfile {
     activeRunId: null,
     activeRunStage: null,
     activeRunStartedAt: null,
+    mapSweepUnlocked: false,
   };
 }
 
@@ -67,7 +85,7 @@ export function demoRefill(
   return {
     profile: {
       ...profile,
-      stamina: profile.stamina + STAMINA_REFILL_AMOUNT,
+      stamina: applyStaminaRefill(profile.stamina),
       refillCountToday: profile.refillCountToday + 1,
     },
     farmPoints: farmPoints - cost,
@@ -116,15 +134,16 @@ export function demoFinish(
   runId?: string | null,
 ): { profile: TdProfile; goldEarned: number } | null {
   const activeId = runId ?? profile.activeRunId;
-  if (!activeId || profile.activeRunId !== activeId) return null;
+  if (!activeId) return null;
+  if (profile.activeRunId && profile.activeRunId !== activeId) return null;
 
   let goldEarned = 0;
   let unlockedStage = profile.unlockedStage;
   if (cleared) {
     goldEarned = stageClearGold(1);
     unlockedStage = Math.max(unlockedStage, 2);
-  } else if (wavesReached > 0) {
-    goldEarned = FAIL_CONSOLATION_GOLD;
+  } else if (wavesReached > 0 || profile.activeRunId === activeId) {
+    goldEarned = wavesReached > 0 ? FAIL_CONSOLATION_GOLD : 0;
   }
   return {
     goldEarned,
@@ -169,6 +188,57 @@ export function demoUpgrade(
   return {
     profile: { ...profile, gold: profile.gold - cost },
     hero: nextHero,
+  };
+}
+
+export function demoUnlockMapSweep(
+  profile: TdProfile,
+  farmPoints: number,
+): { profile: TdProfile; farmPoints: number; pointsSpent: number } | null {
+  if (profile.mapSweepUnlocked || farmPoints < MAP_SWEEP_UNLOCK_POINTS) return null;
+  return {
+    profile: { ...profile, mapSweepUnlocked: true },
+    farmPoints: farmPoints - MAP_SWEEP_UNLOCK_POINTS,
+    pointsSpent: MAP_SWEEP_UNLOCK_POINTS,
+  };
+}
+
+export function demoMapSweepStamina(profile: TdProfile, runs: number): TdProfile | null {
+  const cost = runs * STAMINA_PER_SWEEP_RUN;
+  if (
+    !profile.mapSweepUnlocked ||
+    profile.stamina < cost ||
+    profile.activeRunId ||
+    runs < 1 ||
+    runs > MAP_SWEEP_RUNS_BATCH
+  ) {
+    return null;
+  }
+  return { ...profile, stamina: profile.stamina - cost };
+}
+
+export function demoFastClear(
+  profile: TdProfile,
+  staminaCost: number,
+  sceneWon: boolean,
+  didProgress: boolean,
+): TdProfile | null {
+  if (staminaCost <= 0 || profile.stamina < staminaCost || profile.activeRunId) {
+    return null;
+  }
+  let goldEarned = 0;
+  if (sceneWon) {
+    goldEarned = stageClearGold(1);
+  } else if (didProgress) {
+    goldEarned = FAIL_CONSOLATION_GOLD;
+  }
+  return {
+    ...profile,
+    stamina: profile.stamina - staminaCost,
+    gold: profile.gold + goldEarned,
+    unlockedStage: sceneWon
+      ? Math.max(profile.unlockedStage, 2)
+      : profile.unlockedStage,
   };
 }
 

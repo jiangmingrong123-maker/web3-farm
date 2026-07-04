@@ -1,6 +1,6 @@
 /**
  * GET  /api/td/:wallet              — profile (gold, stamina, buffs, stage)
- * POST /api/td/:wallet/refill-stamina — points → +30 stamina (signed)
+ * POST /api/td/:wallet/refill-stamina — points → +100 stamina (signed)
  * POST /api/td/:wallet/exchange-gold  — points → gold, escalating cost (signed)
  * POST /api/td/:wallet/start        — begin run, -5 stamina (signed)
  * POST /api/td/:wallet/finish       — settle run gold (signed)
@@ -8,14 +8,19 @@
  */
 
 import { requireWalletSignature, type SignedBody } from "../../lib/farm-sign";
+import { corsPreflight, withCors } from "../../lib/cors";
 
 const BUFF_DURATION_MS = 24 * 60 * 60 * 1000;
-const STAMINA_MAX = 30;
-const STAMINA_REFILL_AMOUNT = 30;
-const STAMINA_PER_RUN = 5;
+const STAMINA_MAX = 100;
+const STAMINA_REFILL_AMOUNT = 100;
+const STAMINA_PER_RUN = 1;
 const REFILL_BASE_POINTS = 10;
 const GOLD_EXCHANGE_BASE_POINTS = 100;
 const GOLD_EXCHANGE_REWARD = 100;
+const MAP_SWEEP_UNLOCK_POINTS = 100;
+const STAMINA_PER_MAP_SWEEP = 1;
+const MAP_SWEEP_RUNS_MAX = 10;
+const FAST_CLEAR_STAMINA_MAX = 1;
 const RUN_STALE_MS = 20 * 60 * 1000;
 const FAIL_CONSOLATION_GOLD = 3;
 
@@ -63,6 +68,7 @@ interface TdProfile {
   activeRunId: string | null;
   activeRunStage: number | null;
   activeRunStartedAt: number | null;
+  mapSweepUnlocked?: boolean;
 }
 
 interface ActiveRun {
@@ -73,10 +79,10 @@ interface ActiveRun {
   finishToken?: string;
 }
 
-const NO_CACHE = {
+const NO_CACHE = withCors({
   "Content-Type": "application/json",
   "Cache-Control": "no-store, no-cache, must-revalidate",
-};
+});
 
 const memoryTd = new Map<string, TdProfile>();
 const memoryRuns = new Map<string, ActiveRun>();
@@ -108,6 +114,7 @@ function defaultProfile(): TdProfile {
     activeRunId: null,
     activeRunStage: null,
     activeRunStartedAt: null,
+    mapSweepUnlocked: false,
   };
 }
 
@@ -127,6 +134,7 @@ function resetDailyCounters(profile: TdProfile, now: number): TdProfile {
     refillDayKey: dk,
     refillCountToday: 0,
     goldExchangeCountToday: 0,
+    stamina: profile.stamina >= STAMINA_MAX ? profile.stamina : STAMINA_MAX,
   };
 }
 
@@ -263,6 +271,7 @@ export const onRequest = async (context: {
   params: Record<string, string | string[] | undefined>;
 }) => {
   const { request, env, params } = context;
+  if (request.method === "OPTIONS") return corsPreflight();
   const path = pathSegments(params.path as string | string[] | undefined);
   const wallet = path[0] ? normalizeWallet(path[0]) : null;
   if (!wallet) return new Response("Bad wallet", { status: 400 });
@@ -296,18 +305,20 @@ export const onRequest = async (context: {
     }
 
     await saveFarmPoints(env, wallet, farm.points - cost);
+    const before = profile.stamina;
     profile = {
       ...profile,
       stamina: profile.stamina + STAMINA_REFILL_AMOUNT,
       refillCountToday: profile.refillCountToday + 1,
     };
+    const gained = profile.stamina - before;
     const saved = await saveTd(env, wallet, profile);
     return json({
       ok: true,
       profile: saved,
       pointsSpent: cost,
       farmPoints: farm.points - cost,
-      staminaGained: STAMINA_REFILL_AMOUNT,
+      staminaGained: gained,
     });
   }
 
@@ -433,6 +444,103 @@ export const onRequest = async (context: {
     await deleteRun(env, runId);
 
     return json({ ok: true, profile: saved, goldEarned, cleared });
+  }
+
+  if (path[1] === "unlock-map-sweep" && request.method === "POST") {
+    const body = await parseJson<SignedBody>(request);
+    if (!body) return new Response("Bad JSON", { status: 400 });
+    const auth = await requireWalletSignature("td-unlock-map-sweep", wallet, body);
+    if (auth) return auth;
+
+    let profile = await loadTd(env, wallet);
+    if (profile.mapSweepUnlocked) {
+      return json({ ok: false, error: "ALREADY_UNLOCKED" }, 400);
+    }
+    const farm = await loadFarm(env, wallet);
+    if (farm.points < MAP_SWEEP_UNLOCK_POINTS) {
+      return json(
+        {
+          ok: false,
+          error: "INSUFFICIENT_POINTS",
+          need: MAP_SWEEP_UNLOCK_POINTS,
+          have: farm.points,
+        },
+        400,
+      );
+    }
+    await saveFarmPoints(env, wallet, farm.points - MAP_SWEEP_UNLOCK_POINTS);
+    profile = { ...profile, mapSweepUnlocked: true };
+    const saved = await saveTd(env, wallet, profile);
+    return json({
+      ok: true,
+      profile: saved,
+      pointsSpent: MAP_SWEEP_UNLOCK_POINTS,
+      farmPoints: farm.points - MAP_SWEEP_UNLOCK_POINTS,
+    });
+  }
+
+  if (path[1] === "fast-clear" && request.method === "POST") {
+    const body = await parseJson<SignedBody & { cost?: number; sceneWon?: boolean }>(request);
+    if (!body) return new Response("Bad JSON", { status: 400 });
+    const cost = Math.max(1, Math.min(FAST_CLEAR_STAMINA_MAX, Number(body.cost) || 1));
+    const sceneWon = !!body.sceneWon;
+    const auth = await requireWalletSignature(
+      "td-fast-clear",
+      wallet,
+      body,
+      `cost=${cost}:won=${sceneWon ? 1 : 0}`,
+    );
+    if (auth) return auth;
+
+    let profile = await loadTd(env, wallet);
+    if (profile.stamina < cost) {
+      return json({ ok: false, error: "NO_STAMINA", need: cost, have: profile.stamina }, 400);
+    }
+    if (profile.activeRunId) {
+      return json({ ok: false, error: "RUN_ACTIVE" }, 400);
+    }
+
+    let goldEarned = 0;
+    if (sceneWon) {
+      goldEarned = stageClearGold(1);
+      profile = {
+        ...profile,
+        unlockedStage: Math.max(profile.unlockedStage, 2),
+      };
+    } else {
+      goldEarned = FAIL_CONSOLATION_GOLD;
+    }
+
+    profile = {
+      ...profile,
+      stamina: profile.stamina - cost,
+      gold: profile.gold + goldEarned,
+    };
+    const saved = await saveTd(env, wallet, profile);
+    return json({ ok: true, profile: saved, goldEarned });
+  }
+
+  if (path[1] === "map-sweep" && request.method === "POST") {
+    const body = await parseJson<SignedBody & { runs?: number }>(request);
+    if (!body) return new Response("Bad JSON", { status: 400 });
+    const runs = Math.max(1, Math.min(MAP_SWEEP_RUNS_MAX, Number(body.runs) || 1));
+    const auth = await requireWalletSignature("td-map-sweep", wallet, body, `runs=${runs}`);
+    if (auth) return auth;
+
+    let profile = await loadTd(env, wallet);
+    if (!profile.mapSweepUnlocked) {
+      return json({ ok: false, error: "SWEEP_LOCKED" }, 400);
+    }
+    const cost = runs * STAMINA_PER_MAP_SWEEP;
+    if (profile.stamina < cost) {
+      return json({ ok: false, error: "NO_STAMINA", need: cost, have: profile.stamina }, 400);
+    }
+    if (profile.activeRunId) {
+      return json({ ok: false, error: "RUN_ACTIVE" }, 400);
+    }
+    profile = { ...profile, stamina: profile.stamina - cost };
+    const saved = await saveTd(env, wallet, profile);
+    return json({ ok: true, profile: saved });
   }
 
   if (path[1] === "shop-buy" && request.method === "POST") {

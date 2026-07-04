@@ -2,8 +2,9 @@ import { SWAP_SLOTS_PER_SIDE } from "@/config/swap";
 import type { VerifiedNft } from "@/lib/nft/verify";
 import { SWAP_TIMEOUT_MS } from "./constants";
 import type { ApiNftSlot, ApiParty, ApiRoom, ChatMessage, CreateRoomResponse } from "./api-types";
+import { apiRoot } from "@/lib/api-origin";
 
-const API = "/api/rooms";
+const API = `${apiRoot()}/rooms`;
 const CREATOR_KEY = (id: string) => `swap_creator_${id}`;
 const LOCAL_ROOMS = "swap_local_rooms";
 

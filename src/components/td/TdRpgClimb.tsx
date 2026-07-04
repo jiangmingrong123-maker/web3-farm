@@ -1,80 +1,78 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { useTranslations } from "next-intl";
+import { hubWorldSummary } from "@/config/td/zones";
 import type { ClimbRunState } from "@/lib/td/rpg-combat";
 
 type Props = {
   climb: ClimbRunState;
   settling?: boolean;
   autoRunning?: boolean;
+  locale: string;
   onFinish: () => void;
 };
 
-export function TdRpgClimb({ climb, settling, autoRunning, onFinish }: Props) {
+export function TdRpgClimb({ climb, settling, autoRunning, locale, onFinish }: Props) {
   const t = useTranslations("td");
-  const progress = climb.done
-    ? climb.floor
-    : climb.activeFloor ?? climb.floor;
-  const pct = Math.round((progress / climb.maxFloor) * 100);
+  const w = hubWorldSummary(climb.mapId, climb.scene, locale);
+  const logEndRef = useRef<HTMLDivElement>(null);
 
   const summaryLine = climb.log.find((l) => l.startsWith("✓") || l.startsWith("✗"));
-  const detailStart = climb.log.findIndex((l) => l.startsWith("▶"));
-  const detailLog = detailStart >= 0 ? climb.log.slice(detailStart) : [];
+
+  useEffect(() => {
+    logEndRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [climb.log.length]);
 
   return (
     <div className="space-y-4">
       <div className="rounded-xl border border-gold/30 bg-gold/5 p-4">
-        {autoRunning && !climb.done && (
-          <p className="mb-2 text-sm text-gold animate-pulse">
-            {t("climbRunning", { floor: climb.activeFloor ?? climb.floor + 1 })}
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <p className="text-sm font-medium text-white/85">
+            {w.name} · {w.sceneProgress}
+            {w.bossNext && (
+              <span className="ml-1 text-amber-400">{t("bossSceneTag")}</span>
+            )}
           </p>
-        )}
-        {climb.done && summaryLine && (
-          <p className="mb-2 text-base font-semibold text-gold">{summaryLine}</p>
-        )}
-        <div className="mb-1 flex justify-between text-xs text-white/50">
-          <span>{t("towerFloor")}</span>
-          <span>
-            {progress}/{climb.maxFloor}
-          </span>
+          {autoRunning && (
+            <span className="text-xs text-gold animate-pulse">{t("combatPlaying")}</span>
+          )}
+          {climb.done && summaryLine && !autoRunning && (
+            <span className="text-xs font-semibold text-gold">{summaryLine}</span>
+          )}
         </div>
-        <div className="h-2 overflow-hidden rounded-full bg-black/40">
-          <div
-            className="h-full bg-gold transition-all duration-300"
-            style={{ width: `${pct}%` }}
-          />
-        </div>
-        {!climb.done && (
-          <div className="mt-3 max-h-32 overflow-y-auto font-mono text-xs text-white/55">
-            {climb.log.slice(-8).map((line, i) => (
-              <p key={i}>{line}</p>
-            ))}
-          </div>
-        )}
-      </div>
 
-      {climb.done && detailLog.length > 0 && (
-        <section className="rounded-xl border border-white/10 bg-black/40 p-4">
-          <h2 className="mb-2 text-sm font-semibold text-white/80">
-            {t("combatLogTitle")}
-          </h2>
-          <div className="max-h-[45vh] overflow-y-auto font-mono text-xs leading-relaxed text-white/75">
-            {detailLog.map((line, i) => (
-              <p key={i} className="whitespace-pre-wrap border-b border-white/5 py-1">
-                {line}
-              </p>
-            ))}
-          </div>
-        </section>
-      )}
+        <div className="mt-2 max-h-[55vh] min-h-[200px] overflow-y-auto rounded-lg border border-white/10 bg-black/40 p-3 font-mono text-xs leading-relaxed text-white/80">
+          {climb.log.length === 0 && autoRunning && (
+            <p className="text-white/45">{t("combatLogLoading")}</p>
+          )}
+          {climb.log.map((line, i) => (
+            <p
+              key={i}
+              className={`whitespace-pre-wrap border-b border-white/5 py-1 ${
+                line.startsWith("✓")
+                  ? "text-gold"
+                  : line.startsWith("✗")
+                    ? "text-red-300"
+                    : line.startsWith("—")
+                      ? "text-white/55"
+                      : ""
+              }`}
+            >
+              {line}
+            </p>
+          ))}
+          <div ref={logEndRef} />
+        </div>
+      </div>
 
       <div className="flex flex-wrap gap-3">
         {settling && <p className="text-sm text-gold">{t("settling")}</p>}
-        {climb.done && !settling && (
+        {climb.done && !settling && !autoRunning && (
           <button
             type="button"
             onClick={onFinish}
-            className="rounded-lg border border-white/20 px-6 py-2.5 text-sm"
+            className="rounded-lg bg-gold px-6 py-2.5 text-sm font-semibold text-ink"
           >
             {t("backToHub")}
           </button>

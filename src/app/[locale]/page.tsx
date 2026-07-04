@@ -2,6 +2,7 @@ import { getTranslations, setRequestLocale } from "next-intl/server";
 import { COLLECTIONS } from "@/config/collections";
 import { CollectionCard } from "@/components/CollectionCard";
 import { FarmEntryCard } from "@/components/home/FarmEntryCard";
+import { QuantEntryCard } from "@/components/home/QuantEntryCard";
 import { SwapEntryCard } from "@/components/home/SwapEntryCard";
 import { TierPreviewCard } from "@/components/TierPreviewCard";
 import { TierTable } from "@/components/TierTable";
@@ -43,6 +44,7 @@ export default async function HomePage({
 
       <div className="flex flex-col gap-4">
         <FarmEntryCard />
+        <QuantEntryCard />
         <SwapEntryCard />
       </div>
 

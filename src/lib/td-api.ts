@@ -1,6 +1,7 @@
 import { buildFarmSignMessage } from "./farm-sign";
+import { apiRoot } from "./api-origin";
 
-const API = "/api/td";
+const API = `${apiRoot()}/td`;
 
 export type TdBuff = {
   purchasedAt: number;
@@ -19,6 +20,8 @@ export type TdProfile = {
   activeRunId: string | null;
   activeRunStage: number | null;
   activeRunStartedAt: number | null;
+  /** 已解锁扫图（首次消耗 100 积分） */
+  mapSweepUnlocked?: boolean;
 };
 
 export type TdSignFn = (message: string) => Promise<`0x${string}`>;
@@ -201,4 +204,60 @@ export async function buyTdShopItemApi(
     `itemId=${itemId}`,
   );
   return data?.ok && data.profile ? data.profile : null;
+}
+
+export async function unlockMapSweepApi(
+  wallet: string,
+  sign: TdSignFn,
+): Promise<{ profile: TdProfile; farmPoints: number; pointsSpent: number } | null> {
+  const data = await signedPost<{
+    ok?: boolean;
+    profile?: TdProfile;
+    farmPoints?: number;
+    pointsSpent?: number;
+  }>(wallet, "unlock-map-sweep", "td-unlock-map-sweep", {}, sign);
+  if (!data?.ok || !data.profile) return null;
+  return {
+    profile: data.profile,
+    farmPoints: data.farmPoints ?? 0,
+    pointsSpent: data.pointsSpent ?? 0,
+  };
+}
+
+export async function mapSweepStaminaApi(
+  wallet: string,
+  sign: TdSignFn,
+  runs: number,
+): Promise<TdProfile | null> {
+  const data = await signedPost<{ ok?: boolean; profile?: TdProfile }>(
+    wallet,
+    "map-sweep",
+    "td-map-sweep",
+    { runs },
+    sign,
+    `runs=${runs}`,
+  );
+  return data?.ok && data.profile ? data.profile : null;
+}
+
+export async function fastClearStaminaApi(
+  wallet: string,
+  sign: TdSignFn,
+  cost: number,
+  sceneWon: boolean,
+): Promise<{ profile: TdProfile; goldEarned: number } | null> {
+  const data = await signedPost<{
+    ok?: boolean;
+    profile?: TdProfile;
+    goldEarned?: number;
+  }>(
+    wallet,
+    "fast-clear",
+    "td-fast-clear",
+    { cost, sceneWon },
+    sign,
+    `cost=${cost}:won=${sceneWon ? 1 : 0}`,
+  );
+  if (!data?.ok || !data.profile) return null;
+  return { profile: data.profile, goldEarned: data.goldEarned ?? 0 };
 }

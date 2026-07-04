@@ -4,27 +4,36 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { useAccount } from "wagmi";
 import { useFarmSign } from "@/lib/web3/use-farm-sign";
-import { STAGE1_NAME } from "@/config/td/stage1";
-import { SHOP_ITEMS } from "@/config/td/shop";
-import { STAMINA_PER_RUN, STAMINA_REFILL_AMOUNT } from "@/config/td/economy";
-import { defaultHeroSave, type HeroSave } from "@/config/td/rpg";
+import { STAMINA_PER_RUN } from "@/config/td/economy";
+import { defaultHeroSave, syncHeroLevel, type HeroSave } from "@/config/td/rpg";
 import {
   buyTdShopItemApi,
   exchangeTdGoldApi,
   fetchTdProfileApi,
   finishTdRunApi,
+  fastClearStaminaApi,
+  mapSweepStaminaApi,
   refillTdStaminaApi,
   startTdRunApi,
+  unlockMapSweepApi,
   type TdProfile,
 } from "@/lib/td-api";
 import {
+  applySkippedProgress,
+  executeFastClear,
+  estimateFastClearStaminaCost,
+  combatLogDelay,
   createClimbRun,
-  fightNextFloor,
-  floorsCleared,
+  finalizeSceneRun,
+  planBattleEntry,
+  runProgressScore,
+  simulateSceneBattle,
   type ClimbRunState,
 } from "@/lib/td/rpg-combat";
 import {
+  applyRunRewards,
   applyUpgrade,
+  discardInventoryGold,
   loadHeroSave,
   saveHeroSave,
   upgradeCost,
@@ -32,14 +41,18 @@ import {
 } from "@/lib/td/rpg-storage";
 import {
   DEMO_FARM_POINTS,
+  applyDailyProfileReset,
   defaultDemoProfile,
   demoBuy,
   demoExchangeGold,
+  demoFastClear,
   demoFinish,
   demoGoldExchangeCost,
   demoRefill,
   demoRefillCost,
+  demoMapSweepStamina,
   demoStart,
+  demoUnlockMapSweep,
   demoUpgrade,
   isTdDevDemoEnabled,
 } from "@/lib/td/demo-store";
@@ -50,14 +63,22 @@ import {
 } from "@/lib/td/rpg-run-storage";
 import { TdRpgClimb } from "@/components/td/TdRpgClimb";
 import { TdRpgHub } from "@/components/td/TdRpgHub";
-import { fetchFarmStateApi } from "@/lib/farm-api";
+import { TdHubActionPanel } from "@/components/td/TdHubActionPanel";
+import { shopItem } from "@/config/td/shop";
+import { executeMapSweep, type MapSweepMode } from "@/lib/td/map-sweep";
+import type { EquipRarity } from "@/config/td/equipment-catalog";
+import { loadSweepPrefs, saveSweepPrefs } from "@/lib/td/sweep-prefs";
+import { applyShopPurchase } from "@/lib/td/shop-purchase";
 import {
-  resolveHeroAvatar,
-  type HeroAvatar,
-} from "@/lib/td/hero-avatar";
+  appendSystemLogs,
+  sweepEntryToLog,
+  type SystemLogKind,
+  type SystemLogLine,
+} from "@/lib/td/system-log";
+import type { SweepLogEntry } from "@/lib/td/sweep-loot";
 import { playTdSfx } from "@/lib/td/sfx";
 
-type Screen = "hub" | "shop" | "play";
+type Screen = "hub" | "play";
 
 function activeBuffIds(profile: TdProfile): string[] {
   const now = Date.now();
@@ -83,18 +104,24 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
   const [goldExchangeCost, setGoldExchangeCost] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [resultMsg, setResultMsg] = useState<string | null>(null);
+  const [systemLog, setSystemLog] = useState<SystemLogLine[]>([]);
 
   const [runId, setRunId] = useState<string | null>(null);
   const [heroSave, setHeroSave] = useState<HeroSave>(defaultHeroSave());
-  const [heroAvatar, setHeroAvatar] = useState<HeroAvatar>({ kind: "generic", name: "路人" });
   const [climb, setClimb] = useState<ClimbRunState | null>(null);
   const [settling, setSettling] = useState(false);
   const [autoRunning, setAutoRunning] = useState(false);
+  const [sweepLoading, setSweepLoading] = useState(false);
+  const [sweepOpen, setSweepOpen] = useState(false);
+  const [sweepAutoEquip, setSweepAutoEquip] = useState(true);
+  const [sweepRecycleRarities, setSweepRecycleRarities] = useState<EquipRarity[]>([]);
+  const sweepAutoEquipRef = useRef(true);
+  const sweepRecycleRaritiesRef = useRef<EquipRarity[]>([]);
   const [demoMode, setDemoMode] = useState(false);
   const devDemo = isTdDevDemoEnabled();
   const buffsRef = useRef<string[]>([]);
   const heroSaveRef = useRef(heroSave);
+  const profileRef = useRef(profile);
   const finishingRef = useRef(false);
   const finishTokenRef = useRef<string | null>(null);
   const runIdRef = useRef<string | null>(null);
@@ -102,19 +129,58 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
   const autoClimbRef = useRef(false);
   const restoredRunRef = useRef<string | null>(null);
   const settleGenRef = useRef(0);
+  const rewardedRunRef = useRef<string | null>(null);
 
   const [screen, setScreen] = useState<Screen>("hub");
 
+  const pushLog = useCallback((text: string, kind: SystemLogKind = "system") => {
+    setSystemLog((prev) => appendSystemLogs(prev, [{ kind, text }]));
+  }, []);
+
+  const pushSweepLogs = useCallback((entries: SweepLogEntry[]) => {
+    if (entries.length === 0) return;
+    setSystemLog((prev) =>
+      appendSystemLogs(
+        prev,
+        entries.map((e) => sweepEntryToLog(e)),
+      ),
+    );
+  }, []);
+
+  const welcomedRef = useRef(false);
+
+  useEffect(() => {
+    if (profile && screen === "hub" && systemLog.length === 0 && !welcomedRef.current) {
+      welcomedRef.current = true;
+      pushLog(t("systemChatWelcome"), "system");
+    }
+  }, [profile, screen, systemLog.length, pushLog, t]);
+
   const enterDemo = useCallback(() => {
     const p = defaultDemoProfile();
+    const fresh = defaultHeroSave();
     setDemoMode(true);
     setProfile(p);
+    profileRef.current = p;
+    setHeroSave(fresh);
+    heroSaveRef.current = fresh;
+    saveHeroSave("demo", fresh);
     setFarmPoints(DEMO_FARM_POINTS);
     setRefillCost(demoRefillCost(p));
     setGoldExchangeCost(demoGoldExchangeCost(p));
     buffsRef.current = [];
     setError(null);
-    setResultMsg(null);
+    setSystemLog([]);
+    welcomedRef.current = false;
+    setRunId(null);
+    setClimb(null);
+    setSettling(false);
+    autoClimbRef.current = false;
+    finishingRef.current = false;
+    rewardedRunRef.current = null;
+    runIdRef.current = null;
+    activeRunIdRef.current = null;
+    clearPendingRun("demo");
     setScreen("hub");
   }, []);
 
@@ -129,12 +195,25 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
       setError(t("loadFailed"));
       return;
     }
-    setProfile(data.profile);
+    const p = applyDailyProfileReset(data.profile);
+    setProfile(p);
+    profileRef.current = p;
     setFarmPoints(data.farmPoints);
     setRefillCost(data.refillCost);
     setGoldExchangeCost(data.goldExchangeCost);
-    buffsRef.current = activeBuffIds(data.profile);
+    buffsRef.current = activeBuffIds(p);
   }, [address, t, demoMode]);
+
+  useEffect(() => {
+    if (!demoMode || !profile) return;
+    const p = applyDailyProfileReset(profile);
+    if (p !== profile) {
+      setProfile(p);
+      profileRef.current = p;
+      setRefillCost(demoRefillCost(p));
+      setGoldExchangeCost(demoGoldExchangeCost(p));
+    }
+  }, [demoMode, profile]);
 
   useEffect(() => {
     if (demoMode) return;
@@ -151,22 +230,12 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
   }, [address, demoMode]);
 
   useEffect(() => {
-    let cancelled = false;
-    void resolveHeroAvatar(
-      demoMode ? "demo" : address,
-      demoMode,
-      fetchFarmStateApi,
-    ).then((avatar) => {
-      if (!cancelled) setHeroAvatar(avatar);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [address, demoMode]);
-
-  useEffect(() => {
     heroSaveRef.current = heroSave;
   }, [heroSave]);
+
+  useEffect(() => {
+    profileRef.current = profile;
+  }, [profile]);
 
   useEffect(() => {
     runIdRef.current = runId;
@@ -177,6 +246,57 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
   }, [profile?.activeRunId]);
 
   const walletKey = demoMode ? "demo" : address ?? "";
+
+  useEffect(() => {
+    if (!walletKey) return;
+    const prefs = loadSweepPrefs(walletKey);
+    setSweepAutoEquip(prefs.autoEquip);
+    setSweepRecycleRarities(prefs.recycleRarities);
+    sweepAutoEquipRef.current = prefs.autoEquip;
+    sweepRecycleRaritiesRef.current = prefs.recycleRarities;
+  }, [walletKey]);
+
+  useEffect(() => {
+    sweepAutoEquipRef.current = sweepAutoEquip;
+  }, [sweepAutoEquip]);
+
+  useEffect(() => {
+    sweepRecycleRaritiesRef.current = sweepRecycleRarities;
+  }, [sweepRecycleRarities]);
+
+  const grantRunRewards = useCallback(
+    (climbState: ClimbRunState) => {
+      const runKey = runIdRef.current ?? activeRunIdRef.current;
+      if (runKey && rewardedRunRef.current === runKey) return;
+      if (climbState.runExp <= 0 && climbState.runLoot.length === 0 && !climbState.sceneWon)
+        return;
+      const reward = applyRunRewards(
+        heroSaveRef.current,
+        climbState.runExp,
+        climbState.runLoot,
+        climbState.sceneWon,
+        climbState.mapId,
+        climbState.scene,
+        climbState.monsterKills,
+        locale,
+      );
+      heroSaveRef.current = reward.save;
+      setHeroSave(reward.save);
+      saveHeroSave(walletKey, reward.save);
+      if (runKey) rewardedRunRef.current = runKey;
+      for (const q of reward.questLogs) {
+        pushLog(q.text, "system");
+      }
+      pushLog(
+        t("runRewardSummary", {
+          exp: climbState.runExp,
+          loot: climbState.runLoot.length,
+        }),
+        "battle",
+      );
+    },
+    [pushLog, t, walletKey, locale],
+  );
 
   const persistActiveRun = useCallback(
     (id: string, token: string, climbState: ClimbRunState) => {
@@ -192,16 +312,43 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
   );
 
   const showSettleMessage = useCallback(
-    (cleared: boolean, wavesReached: number, goldEarned: number) => {
+    (
+      cleared: boolean,
+      wavesReached: number,
+      goldEarned: number,
+      skip?: { count: number; exp: number },
+    ) => {
       if (cleared) {
-        setResultMsg(t("victoryResult", { gold: goldEarned }));
+        if (skip && skip.count > 0) {
+          pushLog(
+            t("victoryAfterSkip", {
+              skipCount: skip.count,
+              skipExp: skip.exp,
+              gold: goldEarned,
+            }),
+            "battle",
+          );
+        } else {
+          pushLog(t("victoryResult", { gold: goldEarned }), "battle");
+        }
       } else if (wavesReached > 0) {
-        setResultMsg(t("defeatResult", { gold: goldEarned }));
+        if (skip && skip.count > 0) {
+          pushLog(
+            t("defeatAfterSkip", {
+              skipCount: skip.count,
+              skipExp: skip.exp,
+              gold: goldEarned,
+            }),
+            "battle",
+          );
+        } else {
+          pushLog(t("defeatResult", { gold: goldEarned }), "battle");
+        }
       } else {
-        setResultMsg(t("forfeitResult", { gold: goldEarned }));
+        pushLog(t("forfeitResult", { gold: goldEarned }), "battle");
       }
     },
-    [t],
+    [pushLog, t],
   );
 
   const settleRun = useCallback(
@@ -210,20 +357,33 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
       wavesReached: number,
       activeId?: string | null,
       gen?: number,
+      skip?: { count: number; exp: number },
     ): Promise<boolean> => {
       const id = activeId ?? runIdRef.current ?? activeRunIdRef.current;
-      const currentProfile = profile;
+      const currentProfile = profileRef.current;
       if (!id || !currentProfile) return false;
       if (gen != null && gen !== settleGenRef.current) return false;
 
       if (demoMode) {
         const res = demoFinish(currentProfile, cleared, wavesReached, id);
-        if (!res) return false;
+        if (!res) {
+          const recovered: TdProfile = {
+            ...currentProfile,
+            activeRunId: null,
+            activeRunStage: null,
+            activeRunStartedAt: null,
+          };
+          profileRef.current = recovered;
+          setProfile(recovered);
+          clearPendingRun(walletKey);
+          return true;
+        }
         if (gen != null && gen !== settleGenRef.current) return false;
+        profileRef.current = res.profile;
         setProfile(res.profile);
         setRefillCost(demoRefillCost(res.profile));
         setGoldExchangeCost(demoGoldExchangeCost(res.profile));
-        showSettleMessage(cleared, wavesReached, res.goldEarned);
+        showSettleMessage(cleared, wavesReached, res.goldEarned, skip);
         clearPendingRun(walletKey);
         return true;
       }
@@ -245,7 +405,7 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
           finishTokenRef.current = null;
           clearPendingRun(walletKey);
           setProfile(res.profile);
-          showSettleMessage(cleared, wavesReached, res.goldEarned);
+          showSettleMessage(cleared, wavesReached, res.goldEarned, skip);
           await refresh();
           return true;
         }
@@ -268,7 +428,6 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
     [
       address,
       demoMode,
-      profile,
       refresh,
       showSettleMessage,
       sign,
@@ -288,17 +447,20 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
       if (id && token) {
         persistActiveRun(id, token, climbState);
       }
-      const cleared = climbState.victory;
-      const waves = cleared ? climbState.maxFloor : floorsCleared(climbState);
-      const ok = await settleRun(cleared, waves, id, gen);
+      const waves = runProgressScore(climbState);
+      const skip =
+        climbState.skipCount != null && climbState.skipExp != null
+          ? { count: climbState.skipCount, exp: climbState.skipExp }
+          : undefined;
+      const ok = await settleRun(climbState.sceneWon, waves, id, gen, skip);
       if (gen !== settleGenRef.current) return;
       setSettling(false);
       setRunId(null);
       setClimb(null);
       setScreen("hub");
       autoClimbRef.current = false;
+      finishingRef.current = false;
       if (!ok && !demoMode) {
-        finishingRef.current = false;
         setError(t("settleRetryHint"));
       }
     },
@@ -312,35 +474,81 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
       autoClimbRef.current = true;
       setAutoRunning(true);
       setError(null);
-      let state = initial;
 
-      while (!state.done) {
+      const plan = planBattleEntry(
+        heroSaveRef.current,
+        locale,
+        buffsRef.current,
+      );
+      let save = heroSaveRef.current;
+      if (plan.skipped.length > 0) {
+        save = applySkippedProgress(save, plan.skipped);
+        save = syncHeroLevel({ ...save, exp: save.exp + plan.skippedExp });
+        heroSaveRef.current = save;
+        setHeroSave(save);
+        saveHeroSave(walletKey, save);
+      }
+
+      const fightRun = createClimbRun(plan.fightMapId, plan.fightScene);
+      setClimb({
+        ...fightRun,
+        log: [],
+        done: false,
+        activeMap: plan.fightMapId,
+        activeScene: plan.fightScene,
+      });
+      await new Promise((r) => setTimeout(r, 300));
+
+      const sim = simulateSceneBattle(
+        plan.fightMapId,
+        plan.fightScene,
+        save,
+        buffsRef.current,
+        locale,
+      );
+      const allLines = [...plan.skipLog, ...sim.detail, ...sim.summary];
+      const revealed: string[] = [];
+
+      for (const line of allLines) {
         if (gen !== settleGenRef.current) {
           autoClimbRef.current = false;
           setAutoRunning(false);
           return;
         }
-        setClimb({ ...state, activeFloor: state.floor + 1 });
-        await new Promise((r) => setTimeout(r, 320));
-        state = fightNextFloor(state, heroSaveRef.current, buffsRef.current, locale);
-        setClimb(state);
-        const id = runIdRef.current ?? activeRunIdRef.current;
-        const token =
-          finishTokenRef.current ?? loadPendingRun(walletKey)?.finishToken ?? "";
-        if (id && token) persistActiveRun(id, token, state);
-        if (!state.done) await new Promise((r) => setTimeout(r, 180));
+        revealed.push(line);
+        setClimb((prev) =>
+          prev
+            ? {
+                ...prev,
+                log: [...revealed],
+              }
+            : null,
+        );
+        await new Promise((r) => setTimeout(r, combatLogDelay(line)));
       }
 
+      const state = finalizeSceneRun(fightRun, sim, revealed);
+      setClimb({
+        ...state,
+        skipCount: plan.skipped.length,
+        skipExp: plan.skippedExp,
+      });
+
+      const id = runIdRef.current ?? activeRunIdRef.current;
+      const token =
+        finishTokenRef.current ?? loadPendingRun(walletKey)?.finishToken ?? "";
+      if (id && token) persistActiveRun(id, token, state);
+
       setAutoRunning(false);
-      if (gen !== settleGenRef.current) {
-        autoClimbRef.current = false;
-        return;
-      }
-      if (state.victory) playTdSfx("victory");
+      autoClimbRef.current = false;
+
+      if (gen !== settleGenRef.current) return;
+
+      if (state.sceneWon) playTdSfx("victory");
       else playTdSfx("defeat");
-      await autoSettleAndReturn(state, gen);
+      grantRunRewards(state);
     },
-    [autoSettleAndReturn, locale, persistActiveRun, walletKey],
+    [grantRunRewards, locale, persistActiveRun, walletKey],
   );
 
   useEffect(() => {
@@ -360,6 +568,7 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
 
     const gen = settleGenRef.current;
     if (pending.climb.done) {
+      grantRunRewards(pending.climb);
       void autoSettleAndReturn(pending.climb, gen);
     } else {
       setScreen("play");
@@ -369,6 +578,7 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
     address,
     autoSettleAndReturn,
     demoMode,
+    grantRunRewards,
     profile?.activeRunId,
     runAutoClimbLoop,
   ]);
@@ -385,6 +595,7 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
       setFarmPoints(res.farmPoints);
       setRefillCost(demoRefillCost(res.profile));
       setGoldExchangeCost(demoGoldExchangeCost(res.profile));
+      pushLog(t("refillStaminaDone", { cost: res.pointsSpent }), "economy");
       return;
     }
     if (!address) return;
@@ -398,6 +609,7 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
     }
     setProfile(res.profile);
     setFarmPoints(res.farmPoints);
+    pushLog(t("refillStaminaDone", { cost: refillCost }), "economy");
     refresh();
   };
 
@@ -412,7 +624,7 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
       setProfile(res.profile);
       setFarmPoints(res.farmPoints);
       setGoldExchangeCost(demoGoldExchangeCost(res.profile));
-      setResultMsg(t("exchangeResult", { gold: res.goldGained, cost: res.pointsSpent }));
+      pushLog(t("exchangeResult", { gold: res.goldGained, cost: res.pointsSpent }), "economy");
       return;
     }
     if (!address) return;
@@ -426,7 +638,7 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
     }
     setProfile(res.profile);
     setFarmPoints(res.farmPoints);
-    setResultMsg(t("exchangeResult", { gold: res.goldGained, cost: res.pointsSpent }));
+    pushLog(t("exchangeResult", { gold: res.goldGained, cost: res.pointsSpent }), "economy");
     refresh();
   };
 
@@ -436,6 +648,7 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
     restoredRunRef.current = id;
     finishingRef.current = false;
     autoClimbRef.current = false;
+    rewardedRunRef.current = null;
     finishTokenRef.current = token;
     runIdRef.current = id;
     activeRunIdRef.current = id;
@@ -444,7 +657,6 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
     setClimb(climbState);
     persistActiveRun(id, token, climbState);
     setScreen("play");
-    setResultMsg(null);
     setError(null);
     void runAutoClimbLoop(climbState, gen);
     return gen;
@@ -452,10 +664,14 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
 
   const handleForfeit = async (wavesReached: number) => {
     const gen = settleGenRef.current;
+    const pending = loadPendingRun(walletKey);
+    const rewardState = climb ?? pending?.climb;
+    if (rewardState) grantRunRewards(rewardState);
     setSettling(true);
     setError(null);
     const ok = await settleRun(false, wavesReached, undefined, gen);
     setSettling(false);
+    finishingRef.current = false;
     if (!ok && !demoMode) setError(t("settleRetryHint"));
     finishTokenRef.current = null;
     runIdRef.current = null;
@@ -466,18 +682,112 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
     autoClimbRef.current = false;
     if (ok) clearPendingRun(walletKey);
   };
+
+  const handleFastClear = async () => {
+    if (!profile || profile.activeRunId || autoRunning || settling) return;
+
+    const preview = executeFastClear(
+      heroSaveRef.current,
+      locale,
+      buffsRef.current,
+    );
+    const cost = preview.staminaCost;
+
+    if (!preview.didProgress || cost <= 0) {
+      setError(
+        t("fastClearBlocked", {
+          map: preview.plan.fightMapId,
+          scene: preview.plan.fightScene,
+          rounds: preview.plan.fightMetrics.rounds,
+        }),
+      );
+      return;
+    }
+
+    if (profile.stamina < cost) {
+      setError(t("fastClearNoStamina", { need: cost, have: profile.stamina }));
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    if (demoMode) {
+      const spent = demoFastClear(
+        profileRef.current ?? profile,
+        cost,
+        preview.sceneWon,
+        preview.didProgress,
+      );
+      setLoading(false);
+      if (!spent) {
+        setError(t("startFailed"));
+        return;
+      }
+      profileRef.current = spent;
+      setProfile(spent);
+      setRefillCost(demoRefillCost(spent));
+      setGoldExchangeCost(demoGoldExchangeCost(spent));
+      heroSaveRef.current = preview.save;
+      setHeroSave(preview.save);
+      saveHeroSave(walletKey, preview.save);
+      pushLog(preview.summary, "battle");
+      if (preview.sceneWon) playTdSfx("victory");
+      return;
+    }
+
+    if (!address) {
+      setLoading(false);
+      return;
+    }
+    const cleared = await fastClearStaminaApi(
+      address,
+      sign,
+      cost,
+      preview.sceneWon,
+    );
+    setLoading(false);
+    if (!cleared) {
+      setError(t("startFailed"));
+      return;
+    }
+    heroSaveRef.current = preview.save;
+    setHeroSave(preview.save);
+    saveHeroSave(walletKey, preview.save);
+    setProfile(cleared.profile);
+    profileRef.current = cleared.profile;
+    pushLog(
+      `${preview.summary}${cleared.goldEarned > 0 ? ` · +${cleared.goldEarned} 金币` : ""}`,
+      "battle",
+    );
+    if (preview.sceneWon) playTdSfx("victory");
+    await refresh();
+  };
+
   const handleStart = async () => {
     if (!profile) return;
     if (demoMode) {
-      const res = demoStart(profile);
+      let p = profileRef.current ?? profile;
+      if (p.activeRunId && screen === "hub" && !climb && !autoRunning) {
+        p = {
+          ...p,
+          activeRunId: null,
+          activeRunStage: null,
+          activeRunStartedAt: null,
+        };
+        profileRef.current = p;
+        setProfile(p);
+      }
+      const res = demoStart(p);
       if (!res) {
         setError(t("startFailed"));
         return;
       }
+      profileRef.current = res.profile;
       setProfile(res.profile);
       buffsRef.current = activeBuffIds(res.profile);
       activeRunIdRef.current = res.runId;
-      const climbState = createClimbRun();
+      const climbState = createClimbRun(heroSaveRef.current.worldMap, heroSaveRef.current.worldScene);
       beginRunSession(res.runId, "demo", climbState);
       return;
     }
@@ -493,15 +803,131 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
     setProfile(res.profile);
     buffsRef.current = activeBuffIds(res.profile);
     activeRunIdRef.current = res.runId;
-    beginRunSession(res.runId, res.finishToken, createClimbRun());
+    beginRunSession(res.runId, res.finishToken, createClimbRun(heroSaveRef.current.worldMap, heroSaveRef.current.worldScene));
   };
 
   const handleClimbFinish = () => {
-    if (!climb || settling) return;
+    if (!climb || settling || !climb.done) return;
     void autoSettleAndReturn(climb, settleGenRef.current);
   };
 
+  const handleUnlockMapSweep = async () => {
+    if (!profile) return;
+    setSweepLoading(true);
+    setError(null);
+    if (demoMode) {
+      const res = demoUnlockMapSweep(profile, farmPoints);
+      setSweepLoading(false);
+      if (!res) {
+        setError(t("mapSweepUnlockFailed"));
+        return;
+      }
+      setProfile(res.profile);
+      profileRef.current = res.profile;
+      setFarmPoints(res.farmPoints);
+      pushLog(t("mapSweepUnlocked"), "system");
+      return;
+    }
+    if (!address) {
+      setSweepLoading(false);
+      return;
+    }
+    const res = await unlockMapSweepApi(address, sign);
+    setSweepLoading(false);
+    if (!res) {
+      setError(t("mapSweepUnlockFailed"));
+      return;
+    }
+    setProfile(res.profile);
+    profileRef.current = res.profile;
+    setFarmPoints(res.farmPoints);
+    pushLog(t("mapSweepUnlocked"), "system");
+  };
+
+  const handleMapSweep = async (mapId: number, mode: MapSweepMode = "boss", runs = 1) => {
+    if (!profile || profile.activeRunId || sweepLoading) return;
+    const preview = executeMapSweep(
+      heroSaveRef.current,
+      mapId,
+      locale,
+      mode,
+      runs,
+      { autoEquip: sweepAutoEquipRef.current, recycleRarities: sweepRecycleRaritiesRef.current },
+    );
+    if (!preview) {
+      setError(t("mapSweepFailed"));
+      return;
+    }
+    setSweepLoading(true);
+    setError(null);
+    if (demoMode) {
+      const spent = demoMapSweepStamina(profile, runs);
+      setSweepLoading(false);
+      if (!spent) {
+        setError(t("mapSweepFailed"));
+        return;
+      }
+      const nextProfile = { ...spent, gold: spent.gold + preview.goldGained };
+      profileRef.current = nextProfile;
+      setProfile(nextProfile);
+      heroSaveRef.current = preview.save;
+      setHeroSave(preview.save);
+      saveHeroSave(walletKey, preview.save);
+      pushSweepLogs(preview.log);
+      playTdSfx("victory");
+      return;
+    }
+    if (!address) {
+      setSweepLoading(false);
+      return;
+    }
+    const spent = await mapSweepStaminaApi(address, sign, runs);
+    setSweepLoading(false);
+    if (!spent) {
+      setError(t("mapSweepFailed"));
+      return;
+    }
+    const nextProfile = { ...spent, gold: spent.gold + preview.goldGained };
+    profileRef.current = nextProfile;
+    setProfile(nextProfile);
+    heroSaveRef.current = preview.save;
+    setHeroSave(preview.save);
+    saveHeroSave(walletKey, preview.save);
+    pushSweepLogs(preview.log);
+    playTdSfx("victory");
+  };
+
   const handleUpgrade = (kind: UpgradeKind) => {
+    if (
+      kind.type === "protagonist" ||
+      kind.type === "equip" ||
+      kind.type === "stat" ||
+      kind.type === "statBatch" ||
+      kind.type === "discard"
+    ) {
+      if (kind.type === "discard") {
+        const gold = discardInventoryGold(kind.itemId);
+        const next = applyUpgrade(heroSave, kind);
+        if (!next) return;
+        setHeroSave(next);
+        heroSaveRef.current = next;
+        saveHeroSave(walletKey, next);
+        if (profile && gold > 0) {
+          const np = { ...profile, gold: profile.gold + gold };
+          setProfile(np);
+          profileRef.current = np;
+          pushLog(t("inventoryDiscardGold", { gold }), "economy");
+        }
+        setError(null);
+        return;
+      }
+      const next = applyUpgrade(heroSave, kind);
+      if (!next) return;
+      setHeroSave(next);
+      saveHeroSave(walletKey, next);
+      setError(null);
+      return;
+    }
     if (!profile) return;
     const cost = upgradeCost(heroSave, kind);
     if (cost == null || profile.gold < cost) {
@@ -533,6 +959,21 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
 
   const handleBuy = async (itemId: string) => {
     if (!profile) return;
+    const def = shopItem(itemId);
+    if (def?.kind === "gear" || def?.kind === "material") {
+      const res = applyShopPurchase(profile, heroSave, itemId);
+      if (!res) {
+        setError(t("buyFailed"));
+        return;
+      }
+      setProfile(res.profile);
+      profileRef.current = res.profile;
+      setHeroSave(res.hero);
+      heroSaveRef.current = res.hero;
+      saveHeroSave(walletKey, res.hero);
+      setError(null);
+      return;
+    }
     if (demoMode) {
       const next = demoBuy(profile, itemId);
       if (!next) {
@@ -578,33 +1019,34 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
   }
 
   const buffs = profile ? activeBuffIds(profile) : [];
+  const entryPlan =
+    screen === "hub" && profile
+      ? planBattleEntry(heroSave, locale, buffs)
+      : null;
+  const isPowerWall = entryPlan != null && !entryPlan.fightMetrics.canWin;
+  const fastClearCost =
+    profile ? estimateFastClearStaminaCost(heroSave, locale, buffs) : 0;
+  const buffLabels = buffs
+    .map((id) => shopItem(id)?.name ?? id)
+    .filter(Boolean);
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-8">
-      <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
+    <div
+      className={`mx-auto max-w-3xl px-3 py-4 sm:px-4 sm:py-6 ${screen === "hub" ? "pb-[calc(5.75rem+env(safe-area-inset-bottom,0px))]" : ""}`}
+    >
+      <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="font-display text-2xl font-bold text-gold">{t("title")}</h1>
-          <p className="mt-1 text-sm text-white/50">
+          <h1 className="font-display text-xl font-bold text-gold sm:text-2xl">{t("title")}</h1>
+          <p className="mt-0.5 text-xs text-white/50 sm:text-sm">
             {demoMode ? t("demoBadge") : screen === "play" ? t("textModeTagline") : t("subtitle")}
           </p>
         </div>
-        {screen === "hub" && (
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => setScreen("shop")}
-              className="rounded-lg border border-white/15 px-4 py-2 text-sm hover:border-gold/40"
-            >
-              {t("shop")}
-            </button>
-          </div>
-        )}
         {screen !== "hub" && (
           <button
             type="button"
             onClick={() => {
               if (screen === "play" && climb) {
-                handleForfeit(floorsCleared(climb));
+                handleForfeit(runProgressScore(climb));
               } else {
                 setScreen("hub");
               }
@@ -617,53 +1059,15 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
       </div>
 
       {error && screen === "hub" && (
-        <p className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm text-red-300">
+        <p className="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm text-red-300">
           {error}
-        </p>
-      )}
-      {resultMsg && screen === "hub" && (
-        <p className="mb-4 rounded-lg border border-gold/30 bg-gold/10 px-4 py-2 text-sm text-gold">
-          {resultMsg}
         </p>
       )}
 
       {screen === "hub" && profile && (
-        <div className="space-y-6">
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <Stat label={t("gold")} value={profile.gold} />
-            <Stat
-              label={t("stamina")}
-              value={profile.stamina}
-            />
-            <Stat label={t("farmPoints")} value={Math.floor(farmPoints)} />
-            <Stat label={t("stage")} value={`${STAGE1_NAME}`} />
-          </div>
-
-          {buffs.length > 0 && (
-            <div className="rounded-xl border border-white/10 bg-surface p-4">
-              <p className="mb-2 text-xs uppercase tracking-wider text-white/40">
-                {t("activeBuffs")}
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {buffs.map((id) => {
-                  const item = SHOP_ITEMS.find((i) => i.id === id);
-                  const exp = profile.buffs[id]?.expiresAt ?? 0;
-                  return (
-                    <span
-                      key={id}
-                      className="rounded-full border border-gold/30 bg-gold/10 px-3 py-1 text-xs text-gold"
-                    >
-                      {item?.name ?? id} ·{" "}
-                      {formatExpiry(Math.max(0, exp - Date.now()), locale)}
-                    </span>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
+        <div className="space-y-4">
           {profile.activeRunId && !settling && (
-            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4">
+            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3">
               <p className="text-sm text-amber-200">{t("runInProgress")}</p>
               <p className="mt-1 text-xs text-amber-200/70">{t("runInProgressHint")}</p>
               <button
@@ -671,7 +1075,7 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
                 disabled={loading || settling}
                 onClick={() => {
                   const pending = loadPendingRun(walletKey);
-                  handleForfeit(pending ? floorsCleared(pending.climb) : 0);
+                  handleForfeit(pending ? runProgressScore(pending.climb) : 0);
                 }}
                 className="mt-2 text-sm underline text-amber-300 disabled:opacity-40"
               >
@@ -688,84 +1092,86 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
 
           <TdRpgHub
             save={heroSave}
-            gold={profile.gold}
             locale={locale}
-            avatar={heroAvatar}
+            gold={profile.gold}
+            stamina={profile.stamina}
+            farmPoints={farmPoints}
+            mapSweepUnlocked={!!profile.mapSweepUnlocked}
+            activeRun={!!profile.activeRunId}
+            sweepLoading={sweepLoading || loading}
+            loading={loading}
+            refillCost={refillCost}
+            goldExchangeCost={goldExchangeCost}
+            buffIds={buffs}
+            buffExpiry={Object.fromEntries(
+              Object.entries(profile.buffs).map(([id, b]) => [id, b.expiresAt]),
+            )}
+            sweepOpen={sweepOpen}
+            systemLog={systemLog}
+            sweepAutoEquip={sweepAutoEquip}
+            sweepRecycleRarities={sweepRecycleRarities}
+            onSweepOpenChange={setSweepOpen}
+            onSweepAutoEquipChange={(v) => {
+              setSweepAutoEquip(v);
+              if (walletKey) {
+                saveSweepPrefs(walletKey, {
+                  autoEquip: v,
+                  recycleRarities: sweepRecycleRaritiesRef.current,
+                });
+              }
+            }}
+            onSweepRecycleRaritiesChange={(v) => {
+              setSweepRecycleRarities(v);
+              if (walletKey) {
+                saveSweepPrefs(walletKey, {
+                  autoEquip: sweepAutoEquipRef.current,
+                  recycleRarities: v,
+                });
+              }
+            }}
             onUpgrade={handleUpgrade}
+            onUnlockMapSweep={() => void handleUnlockMapSweep()}
+            onMapSweep={(mapId, mode, runs) => void handleMapSweep(mapId, mode, runs)}
+            onRefill={() => void handleRefill()}
+            onExchangeGold={() => void handleExchangeGold()}
+            onBuyShop={(itemId) => void handleBuy(itemId)}
+            formatBuffExpiry={(ms) => formatExpiry(ms, locale)}
+            fightMapId={entryPlan?.fightMapId}
+            fightScene={entryPlan?.fightScene}
+            fightRounds={entryPlan?.fightMetrics.rounds}
+            fastClearCost={fastClearCost}
+            buffLabels={buffLabels}
           />
 
-          <div className="flex flex-wrap gap-3">
-            <button
-              type="button"
-              disabled={
-                loading ||
-                !!profile.activeRunId ||
-                profile.stamina < STAMINA_PER_RUN
-              }
-              onClick={handleStart}
-              className="rounded-lg bg-gold px-6 py-3 text-sm font-semibold text-ink disabled:opacity-40"
-            >
-              {t("startRun", { cost: STAMINA_PER_RUN })}
-            </button>
-            <button
-              type="button"
-              disabled={loading || farmPoints < refillCost}
-              onClick={handleRefill}
-              className="rounded-lg border border-white/20 px-6 py-3 text-sm disabled:opacity-40"
-            >
-              {t("refillStamina", { cost: refillCost, amount: STAMINA_REFILL_AMOUNT })}
-            </button>
-            <button
-              type="button"
-              disabled={loading || farmPoints < goldExchangeCost}
-              onClick={handleExchangeGold}
-              className="rounded-lg border border-gold/30 bg-gold/10 px-6 py-3 text-sm text-gold disabled:opacity-40"
-            >
-              {t("exchangeGold", { cost: goldExchangeCost, gold: 100 })}
-            </button>
-          </div>
-
-          <p className="text-xs text-white/35">{t("rulesHint")}</p>
-        </div>
-      )}
-
-      {screen === "shop" && profile && (
-        <div className="space-y-4">
-          <p className="text-sm text-white/50">
-            {t("shopHint")} · {t("gold")}: {profile.gold}
-          </p>
-          <div className="grid gap-3 sm:grid-cols-2">
-            {SHOP_ITEMS.map((item) => {
-              const active = buffs.includes(item.id);
-              const canBuy = profile.gold >= item.price && !loading;
-              return (
-                <div
-                  key={item.id}
-                  className="rounded-xl border border-white/10 bg-surface p-4"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <p className="font-medium">{item.name}</p>
-                      <p className="mt-1 text-xs text-white/45">{item.description}</p>
-                    </div>
-                    <span className="shrink-0 text-sm text-gold">{item.price}G</span>
-                  </div>
-                  {active ? (
-                    <p className="mt-3 text-xs text-green-400">{t("buffActive")}</p>
-                  ) : (
-                    <button
-                      type="button"
-                      disabled={!canBuy}
-                      onClick={() => handleBuy(item.id)}
-                      className="mt-3 rounded-lg border border-white/15 px-3 py-1.5 text-xs disabled:opacity-40"
-                    >
-                      {t("buy")}
-                    </button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+          <TdHubActionPanel
+            startDisabled={
+              loading ||
+              !!profile.activeRunId ||
+              profile.stamina < STAMINA_PER_RUN ||
+              settling ||
+              autoRunning
+            }
+            fastClearDisabled={
+              loading ||
+              !!profile.activeRunId ||
+              fastClearCost <= 0 ||
+              profile.stamina < fastClearCost ||
+              settling ||
+              autoRunning
+            }
+            fastClearCost={fastClearCost}
+            onStart={handleStart}
+            onFastClear={() => void handleFastClear()}
+            powerWall={
+              isPowerWall && entryPlan
+                ? {
+                    map: entryPlan.fightMapId,
+                    scene: entryPlan.fightScene,
+                    rounds: entryPlan.fightMetrics.rounds,
+                  }
+                : null
+            }
+          />
         </div>
       )}
 
@@ -774,6 +1180,7 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
           climb={climb}
           settling={settling}
           autoRunning={autoRunning}
+          locale={locale}
           onFinish={handleClimbFinish}
         />
       )}
@@ -781,15 +1188,6 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
       {loading && screen === "hub" && !profile && (
         <p className="text-center text-white/40">{t("loading")}</p>
       )}
-    </div>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: string | number }) {
-  return (
-    <div className="rounded-xl border border-white/10 bg-surface px-4 py-3">
-      <p className="text-xs text-white/40">{label}</p>
-      <p className="mt-1 text-lg font-semibold">{value}</p>
     </div>
   );
 }

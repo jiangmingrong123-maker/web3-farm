@@ -40,5 +40,5 @@ export const wagmiConfig = createConfig({
   transports: {
     [mainnet.id]: http(MAINNET_RPC, { timeout: 30_000 }),
   },
-  ssr: true,
+  ssr: false,
 });

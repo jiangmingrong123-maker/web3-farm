@@ -1,5 +1,6 @@
 import { isWhitelistedContract } from "@/config/swap";
 import type { Address } from "viem";
+import { apiRoot } from "@/lib/api-origin";
 import { nftProxyImageUrl } from "./proxy-image";
 
 export interface VerifiedNft {
@@ -23,10 +24,7 @@ export type VerifyNftError =
   | "NOT_FOUND";
 
 function verifyApiUrl(): string {
-  if (typeof window !== "undefined") {
-    return `${window.location.origin}/api/nft/verify`;
-  }
-  return "/api/nft/verify";
+  return `${apiRoot()}/nft/verify`;
 }
 
 type ApiVerifyResponse =

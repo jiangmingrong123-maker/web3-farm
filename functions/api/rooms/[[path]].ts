@@ -3,6 +3,8 @@
  * Bind KV namespace "SWAP_KV" in Pages → Settings → Bindings.
  */
 
+import { corsPreflight, withCors } from "../../lib/cors";
+
 const SWAP_TIMEOUT_MS = 10 * 60 * 1000;
 const WHITELIST = ["0xa28d6a8eb65a41f3958f1de62cbfca20b817e66a"];
 
@@ -48,10 +50,10 @@ interface Env {
 
 const memory = new Map<string, StoredRoom>();
 
-const NO_CACHE = {
+const NO_CACHE = withCors({
   "Content-Type": "application/json",
   "Cache-Control": "no-store, no-cache, must-revalidate",
-};
+});
 
 function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), { status, headers: NO_CACHE });
@@ -153,6 +155,7 @@ export const onRequest = async (context: {
   params: Record<string, string | string[] | undefined>;
 }) => {
   const { request, env, params } = context;
+  if (request.method === "OPTIONS") return corsPreflight();
   const path = pathSegments(params.path as string | string[] | undefined);
   const method = request.method;
   const url = new URL(request.url);
