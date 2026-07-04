@@ -2,17 +2,22 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
+import { useAccount } from "wagmi";
 import { QUANT_POOLS, poolsForChain, type QuantChain } from "@/config/quant/markets";
 import { ChainPicker } from "@/components/quant/ChainPicker";
 import { StrategyParamsQuick } from "@/components/quant/StrategyParamsQuick";
 import { StrategyQuickCards } from "@/components/quant/StrategyQuickCards";
-import {
-  getStrategy,
-  type StrategyId,
-} from "@/config/quant/strategies";
+import { getStrategy, type StrategyId } from "@/config/quant/strategies";
 import { formatUsdPrice, formatUsdPriceLabel } from "@/lib/quant/format-price";
 import { latestSignal } from "@/lib/quant/backtest";
 import { fetchPoolKlines, fetchPoolPrice } from "@/lib/quant/klines";
+import {
+  fetchCloudPaperApi,
+  resetCloudPaperApi,
+  startCloudPaperApi,
+  stopCloudPaperApi,
+  type CloudPaperState,
+} from "@/lib/quant-api";
 import {
   loadPaperState,
   paperBuy,
@@ -22,6 +27,7 @@ import {
   savePaperState,
   type PaperState,
 } from "@/lib/quant/paper-store";
+import { useFarmSign } from "@/lib/web3/use-farm-sign";
 
 type Props = {
   locale: string;
@@ -35,6 +41,8 @@ type Props = {
   onParamsChange: (params: Record<string, number>) => void;
   onOpenLive: () => void;
 };
+
+type PaperMode = "local" | "cloud";
 
 export function QuantQuickPanel({
   locale,
@@ -50,7 +58,14 @@ export function QuantQuickPanel({
 }: Props) {
   const t = useTranslations("quant");
   const zh = locale === "zh";
+  const { address, isConnected } = useAccount();
+  const farmSign = useFarmSign();
+
+  const [paperMode, setPaperMode] = useState<PaperMode>("cloud");
   const [state, setState] = useState<PaperState | null>(null);
+  const [cloudState, setCloudState] = useState<CloudPaperState | null>(null);
+  const [cloudEquity, setCloudEquity] = useState<number>(10_000);
+  const [cloudKv, setCloudKv] = useState(true);
   const [price, setPrice] = useState<number | null>(null);
   const [signal, setSignal] = useState<"buy" | "sell" | "hold">("hold");
   const [loading, setLoading] = useState(false);
@@ -61,8 +76,7 @@ export function QuantQuickPanel({
   const strat = getStrategy(strategyId);
 
   useEffect(() => {
-    const saved = loadPaperState();
-    setState(saved);
+    setState(loadPaperState());
   }, []);
 
   const persist = useCallback((next: PaperState) => {
@@ -70,27 +84,58 @@ export function QuantQuickPanel({
     savePaperState(next);
   }, []);
 
+  const refreshCloud = useCallback(async () => {
+    if (!address) return;
+    const data = await fetchCloudPaperApi(address);
+    if (!data) return;
+    setCloudKv(data.kv);
+    setCloudState(data.state);
+    if (data.equity != null) setCloudEquity(data.equity);
+    if (data.state?.lastPrice != null) setPrice(data.state.lastPrice);
+    if (data.state?.lastSignal) setSignal(data.state.lastSignal);
+  }, [address]);
+
+  useEffect(() => {
+    void refreshCloud();
+    if (!address) return;
+    const id = window.setInterval(() => void refreshCloud(), 20_000);
+    return () => clearInterval(id);
+  }, [address, refreshCloud]);
+
   const runningRef = useRef(false);
   useEffect(() => {
     runningRef.current = state?.running ?? false;
   }, [state?.running]);
 
-  const tick = useCallback(async (): Promise<PaperState | null> => {
+  const previewTick = useCallback(async () => {
+    setError(null);
+    try {
+      const klines = await fetchPoolKlines(pool, "1h", 80);
+      const p = await fetchPoolPrice(pool);
+      const sig = latestSignal(strategyId, klines, params);
+      if (paperMode === "local" || !cloudState?.running) {
+        setPrice(p);
+        setSignal(sig);
+      }
+      return { p, sig };
+    } catch (e) {
+      if (paperMode === "local") {
+        setError(e instanceof Error ? e.message : t("fetchError"));
+      }
+      return null;
+    }
+  }, [pool, strategyId, params, paperMode, cloudState?.running, t]);
+
+  const localTick = useCallback(async (): Promise<PaperState | null> => {
     const cur = loadPaperState();
-    const activePool =
-      QUANT_POOLS.find((p) => p.id === (cur.marketId || poolId)) ?? pool;
     setLoading(true);
     setError(null);
     try {
-      const klines = await fetchPoolKlines(activePool, "1h", 80);
-      const p = await fetchPoolPrice(activePool);
-      const sig = latestSignal(cur.strategyId ?? strategyId, klines, params);
-      setPrice(p);
-      setSignal(sig);
-      if (!cur.running) return cur;
+      const hit = await previewTick();
+      if (!hit || !cur.running) return cur;
       let next = cur;
-      if (sig === "buy") next = paperBuy(cur, p);
-      else if (sig === "sell") next = paperSell(cur, p);
+      if (hit.sig === "buy") next = paperBuy(cur, hit.p);
+      else if (hit.sig === "sell") next = paperSell(cur, hit.p);
       if (next !== cur) persist(next);
       return next;
     } catch (e) {
@@ -99,13 +144,17 @@ export function QuantQuickPanel({
     } finally {
       setLoading(false);
     }
-  }, [pool, poolId, strategyId, params, persist, t]);
+  }, [previewTick, persist, t]);
 
   useEffect(() => {
-    void tick();
-    const id = window.setInterval(() => void tick(), 45_000);
+    void previewTick();
+    const ms = paperMode === "local" ? 45_000 : 60_000;
+    const id = window.setInterval(() => {
+      if (paperMode === "local") void localTick();
+      else void previewTick();
+    }, ms);
     return () => clearInterval(id);
-  }, [tick]);
+  }, [paperMode, previewTick, localTick]);
 
   const startSim = useCallback(async () => {
     const base = state ?? loadPaperState();
@@ -118,16 +167,16 @@ export function QuantQuickPanel({
         {
           time: Date.now(),
           text: zh
-            ? `开始模拟 · ${pool.baseSymbol} · ${strat.nameZh}`
-            : `Paper start · ${pool.baseSymbol} · ${strat.nameEn}`,
+            ? `本机模拟 · ${pool.baseSymbol} · ${strat.nameZh}`
+            : `Local paper · ${pool.baseSymbol} · ${strat.nameEn}`,
         },
         ...base.logs.slice(0, 48),
       ],
     };
     persist(next);
     runningRef.current = true;
-    await tick();
-  }, [state, poolId, strategyId, pool, strat, zh, persist, tick]);
+    await localTick();
+  }, [state, poolId, strategyId, pool, strat, zh, persist, localTick]);
 
   const stopSim = useCallback(() => {
     if (!state) return;
@@ -135,17 +184,104 @@ export function QuantQuickPanel({
     persist({ ...state, running: false });
   }, [state, persist]);
 
-  const equity = state ? paperEquity(state, price ?? 1) : 10_000;
-  const pnl = equity - 10_000;
-  const pos = state?.positions.find((p) => p.marketId === poolId);
+  const startCloud = useCallback(async () => {
+    if (!address || !isConnected) {
+      setError(t("cloudNeedWallet"));
+      return;
+    }
+    if (!cloudKv) {
+      setError(t("cloudKvMissing"));
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await startCloudPaperApi(
+        address,
+        { marketId: poolId, strategyId, params },
+        farmSign,
+      );
+      if (!res) {
+        setError(t("cloudActionFailed"));
+        return;
+      }
+      setCloudState(res.state);
+      setCloudEquity(res.equity);
+      if (res.state.lastPrice != null) setPrice(res.state.lastPrice);
+      if (res.state.lastSignal) setSignal(res.state.lastSignal);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t("cloudActionFailed"));
+    } finally {
+      setLoading(false);
+    }
+  }, [address, isConnected, cloudKv, poolId, strategyId, params, farmSign, t]);
 
-  const signalLabel = t(`signal_${signal}`);
+  const stopCloud = useCallback(async () => {
+    if (!address) return;
+    setLoading(true);
+    try {
+      const next = await stopCloudPaperApi(address, farmSign);
+      if (next) setCloudState(next);
+      else setError(t("cloudActionFailed"));
+    } catch {
+      setError(t("cloudActionFailed"));
+    } finally {
+      setLoading(false);
+    }
+  }, [address, farmSign, t]);
+
+  const resetCloud = useCallback(async () => {
+    if (!address) return;
+    setLoading(true);
+    try {
+      const next = await resetCloudPaperApi(address, farmSign);
+      if (next) {
+        setCloudState(next);
+        setCloudEquity(10_000);
+      } else setError(t("cloudActionFailed"));
+    } catch {
+      setError(t("cloudActionFailed"));
+    } finally {
+      setLoading(false);
+    }
+  }, [address, farmSign, t]);
+
+  const cloudRunning = cloudState?.running ?? false;
+  const displayPrice =
+    paperMode === "cloud" && cloudState?.lastPrice != null
+      ? cloudState.lastPrice
+      : price;
+  const displaySignal =
+    paperMode === "cloud" && cloudState?.lastSignal
+      ? cloudState.lastSignal
+      : signal;
+
+  const equity =
+    paperMode === "cloud"
+      ? cloudEquity
+      : state
+        ? paperEquity(state, price ?? 1)
+        : 10_000;
+  const pnl = equity - 10_000;
+  const pos =
+    paperMode === "cloud"
+      ? cloudState?.positions.find((p) => p.marketId === (cloudState?.marketId ?? poolId))
+      : state?.positions.find((p) => p.marketId === poolId);
+  const posPool =
+    paperMode === "cloud" && cloudState?.marketId
+      ? (QUANT_POOLS.find((p) => p.id === cloudState.marketId) ?? pool)
+      : pool;
+
+  const signalLabel = t(`signal_${displaySignal}`);
   const signalClass =
-    signal === "buy"
+    displaySignal === "buy"
       ? "text-emerald-400"
-      : signal === "sell"
+      : displaySignal === "sell"
         ? "text-red-400"
         : "text-white/50";
+
+  const logs =
+    paperMode === "cloud" ? (cloudState?.logs ?? []) : (state?.logs ?? []);
 
   const steps = useMemo(
     () => [
@@ -159,13 +295,58 @@ export function QuantQuickPanel({
 
   return (
     <div className="space-y-4">
-      <div className="rounded-xl border border-cyan-500/20 bg-cyan-950/20 px-3 py-2.5 text-xs leading-relaxed text-cyan-100/75">
-        {t("paperPreviewIntro")}
+      <div className="flex rounded-xl border border-white/10 bg-black/30 p-1">
+        <button
+          type="button"
+          onClick={() => setPaperMode("cloud")}
+          className={`flex-1 rounded-lg py-2 text-[11px] font-semibold transition ${
+            paperMode === "cloud"
+              ? "bg-cyan-700/80 text-white"
+              : "text-white/45 hover:text-white/70"
+          }`}
+        >
+          {t("paperModeCloud")}
+          <span className="mt-0.5 block text-[9px] font-normal opacity-70">
+            {t("paperModeCloudHint")}
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setPaperMode("local")}
+          className={`flex-1 rounded-lg py-2 text-[11px] font-semibold transition ${
+            paperMode === "local"
+              ? "bg-emerald-700/80 text-white"
+              : "text-white/45 hover:text-white/70"
+          }`}
+        >
+          {t("paperModeLocal")}
+          <span className="mt-0.5 block text-[9px] font-normal opacity-70">
+            {t("paperModeLocalHint")}
+          </span>
+        </button>
       </div>
 
-      <p className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-[11px] leading-relaxed text-white/45">
-        {t("autoTradeHow")}
-      </p>
+      <div className="rounded-xl border border-cyan-500/20 bg-cyan-950/20 px-3 py-2.5 text-xs leading-relaxed text-cyan-100/75">
+        {paperMode === "cloud" ? t("cloudIntro") : t("paperPreviewIntro")}
+      </div>
+
+      {paperMode === "local" && (
+        <p className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-[11px] leading-relaxed text-white/45">
+          {t("autoTradeHow")}
+        </p>
+      )}
+
+      {paperMode === "cloud" && !isConnected && (
+        <p className="rounded-lg border border-amber-500/30 bg-amber-950/25 px-3 py-2 text-[11px] text-amber-200/85">
+          {t("cloudNeedWallet")}
+        </p>
+      )}
+
+      {paperMode === "cloud" && isConnected && !cloudKv && (
+        <p className="rounded-lg border border-red-500/30 bg-red-950/25 px-3 py-2 text-[11px] text-red-200/85">
+          {t("cloudKvMissing")}
+        </p>
+      )}
 
       <ol className="flex gap-2 text-[10px] text-white/40">
         {steps.map((s) => (
@@ -175,16 +356,9 @@ export function QuantQuickPanel({
         ))}
       </ol>
 
-      {/* 选链 + 选币 */}
       <section className="space-y-2">
         <p className="text-xs font-medium text-white/55">{t("quickPickChain")}</p>
-        <ChainPicker
-          locale={locale}
-          chain={chain}
-          onChange={(next) => {
-            onChainChange(next);
-          }}
-        />
+        <ChainPicker locale={locale} chain={chain} onChange={onChainChange} />
       </section>
 
       <section>
@@ -205,26 +379,15 @@ export function QuantQuickPanel({
               >
                 <p className="text-sm font-bold text-white/90">{p.baseSymbol}</p>
                 <p className="mt-0.5 text-[10px] text-white/40">{p.quoteSymbol}</p>
-                {p.priceFromBinance && (
-                  <p className="mt-0.5 text-[9px] text-cyan-400/70">{t("dataBinance")}</p>
-                )}
               </button>
             );
           })}
         </div>
-        {chain === "bsc" && (
-          <p className="mt-2 text-[10px] text-white/35">{t("bscMoreSoon")}</p>
-        )}
       </section>
 
-      {/* 选策略 */}
       <section>
         <p className="mb-2 text-xs font-medium text-white/55">{t("quickPickStrategy")}</p>
-        <StrategyQuickCards
-          locale={locale}
-          strategyId={strategyId}
-          onSelect={onStrategyChange}
-        />
+        <StrategyQuickCards locale={locale} strategyId={strategyId} onSelect={onStrategyChange} />
       </section>
 
       <section>
@@ -237,11 +400,10 @@ export function QuantQuickPanel({
         />
       </section>
 
-      {/* 现价 + 信号 */}
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         <MiniStat
           label={t("quickPrice")}
-          value={price != null ? formatUsdPriceLabel(price, locale) : "—"}
+          value={displayPrice != null ? formatUsdPriceLabel(displayPrice, locale) : "—"}
         />
         <MiniStat label={t("quickSignal")} value={signalLabel} valueClass={signalClass} />
         <MiniStat label={t("paperEquity")} value={`$${equity.toFixed(0)}`} />
@@ -252,11 +414,20 @@ export function QuantQuickPanel({
         />
       </div>
 
+      {paperMode === "cloud" && cloudState?.lastTickAt && (
+        <p className="text-center text-[10px] text-white/35">
+          {t("cloudLastTick")}: {new Date(cloudState.lastTickAt).toLocaleString(locale)}
+          {cloudState.tickCount > 0 && (
+            <> · {t("cloudTickCount")}: {cloudState.tickCount}</>
+          )}
+        </p>
+      )}
+
       {pos && (
         <p className="text-center text-[11px] text-white/45">
           {t("quickHolding", {
             qty: pos.qty.toFixed(4),
-            symbol: pool.baseSymbol,
+            symbol: posPool.baseSymbol,
             avg: formatUsdPrice(pos.avgPrice, locale),
           })}
         </p>
@@ -268,9 +439,34 @@ export function QuantQuickPanel({
         </p>
       )}
 
-      {/* 主按钮 */}
+      {cloudState?.lastError && paperMode === "cloud" && (
+        <p className="rounded-lg border border-amber-500/30 bg-amber-950/20 px-3 py-2 text-[10px] text-amber-200/80">
+          {cloudState.lastError}
+        </p>
+      )}
+
       <div className="flex flex-col gap-2 sm:flex-row">
-        {!state?.running ? (
+        {paperMode === "cloud" ? (
+          !cloudRunning ? (
+            <button
+              type="button"
+              disabled={loading || !isConnected}
+              onClick={() => void startCloud()}
+              className="flex-1 rounded-xl bg-gradient-to-r from-cyan-600 to-cyan-500 py-4 text-base font-bold text-white shadow-lg disabled:opacity-50"
+            >
+              {loading ? t("running") : t("cloudStart")}
+            </button>
+          ) : (
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() => void stopCloud()}
+              className="flex-1 rounded-xl border border-red-500/50 bg-red-950/40 py-4 text-base font-bold text-red-300"
+            >
+              {t("cloudStop")}
+            </button>
+          )
+        ) : !state?.running ? (
           <button
             type="button"
             disabled={loading}
@@ -290,9 +486,13 @@ export function QuantQuickPanel({
         )}
         <button
           type="button"
+          disabled={loading}
           onClick={() => {
-            const r = resetPaperState();
-            persist({ ...r, marketId: poolId, strategyId });
+            if (paperMode === "cloud") void resetCloud();
+            else {
+              const r = resetPaperState();
+              persist({ ...r, marketId: poolId, strategyId });
+            }
           }}
           className="rounded-xl border border-white/15 px-4 py-4 text-sm text-white/45 sm:py-2"
         >
@@ -300,7 +500,10 @@ export function QuantQuickPanel({
         </button>
       </div>
 
-      {state?.running && (
+      {paperMode === "cloud" && cloudRunning && (
+        <p className="text-center text-[11px] text-cyan-400/80">{t("cloudRunningHint")}</p>
+      )}
+      {paperMode === "local" && state?.running && (
         <p className="text-center text-[11px] text-emerald-400/80">{t("quickRunningHint")}</p>
       )}
 
@@ -314,11 +517,11 @@ export function QuantQuickPanel({
         {t("goLiveEntry")}
       </button>
 
-      {state && state.logs.length > 0 && (
+      {logs.length > 0 && (
         <section className="rounded-xl border border-white/10 bg-black/25 p-3">
           <p className="mb-2 text-xs font-medium text-white/50">{t("paperLog")}</p>
           <ul className="max-h-32 space-y-1 overflow-y-auto font-mono text-[10px] text-white/55">
-            {state.logs.slice(0, 12).map((l, i) => (
+            {logs.slice(0, 12).map((l, i) => (
               <li key={`${l.time}-${i}`}>
                 {new Date(l.time).toLocaleTimeString(locale)} · {l.text}
               </li>
