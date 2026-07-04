@@ -13,6 +13,7 @@ export function QuantDisclaimer() {
         <li>{t("disclaimer2")}</li>
         <li>{t("disclaimer3")}</li>
         <li>{t("disclaimer4")}</li>
+        <li>{t("disclaimer5")}</li>
       </ul>
     </aside>
   );

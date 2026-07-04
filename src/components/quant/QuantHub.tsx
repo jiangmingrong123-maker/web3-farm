@@ -68,6 +68,9 @@ export function QuantHub({ locale }: Props) {
         <p className="mb-1 text-xs tracking-[0.2em] text-gold/80">{t("badge")}</p>
         <h1 className="font-display text-2xl font-bold">{t("title")}</h1>
         <p className="mt-1.5 text-sm text-white/45">{t("quickTagline")}</p>
+        <p className="mx-auto mt-2 max-w-md rounded-lg border border-white/10 bg-black/25 px-3 py-2 text-[11px] leading-relaxed text-white/40">
+          {t("templateScopeNotice")}
+        </p>
       </header>
 
       <div className="flex rounded-xl border border-white/10 bg-black/30 p-1">
