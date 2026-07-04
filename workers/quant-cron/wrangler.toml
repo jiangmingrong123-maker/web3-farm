@@ -1,0 +1,13 @@
+name = "web3-farm-quant-cron"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+
+# 每 5 分钟触发一次云端模拟检查
+[triggers]
+crons = ["*/5 * * * *"]
+
+[vars]
+PAGES_URL = "https://web3-farm.pages.dev"
+
+# 部署前执行：npx wrangler secret put CRON_SECRET
+# 值须与 Pages 项目 Variables 里的 CRON_SECRET 相同
