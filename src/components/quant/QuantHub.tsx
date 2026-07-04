@@ -11,15 +11,14 @@ import { QuantTerms } from "@/components/quant/QuantTerms";
 import { SignalsPanel } from "@/components/quant/SignalsPanel";
 import { StrategyPanel } from "@/components/quant/StrategyPanel";
 import { QUANT_POOLS, poolsForChain, type QuantChain } from "@/config/quant/markets";
-import { QUANT_STRATEGIES, type StrategyId } from "@/config/quant/strategies";
+import { defaultParams, type StrategyId } from "@/config/quant/strategies";
 import { loadPaperState } from "@/lib/quant/paper-store";
 
 type Props = { locale: string };
 type QuantMode = "paper" | "live";
 
-function defaultParams(strategyId: StrategyId): Record<string, number> {
-  const s = QUANT_STRATEGIES.find((x) => x.id === strategyId)!;
-  return Object.fromEntries(s.params.map((p) => [p.key, p.default]));
+function defaultParamsForStrategy(strategyId: StrategyId): Record<string, number> {
+  return defaultParams(strategyId);
 }
 
 export function QuantHub({ locale }: Props) {
@@ -32,7 +31,7 @@ export function QuantHub({ locale }: Props) {
   const [advTab, setAdvTab] = useState<"backtest" | "signals" | "templates" | "connectors">(
     "backtest",
   );
-  const [params, setParams] = useState<Record<string, number>>(() => defaultParams("ma_cross"));
+  const [params, setParams] = useState<Record<string, number>>(() => defaultParamsForStrategy("ma_cross"));
 
   useEffect(() => {
     const saved = loadPaperState();
@@ -46,7 +45,11 @@ export function QuantHub({ locale }: Props) {
 
   const onSelectStrategy = useCallback((id: StrategyId) => {
     setStrategyId(id);
-    setParams(defaultParams(id));
+    setParams(defaultParamsForStrategy(id));
+  }, []);
+
+  const onParamsChange = useCallback((next: Record<string, number>) => {
+    setParams(next);
   }, []);
 
   const onParam = useCallback((key: string, v: number) => {
@@ -100,9 +103,11 @@ export function QuantHub({ locale }: Props) {
           chain={chain}
           poolId={poolId}
           strategyId={strategyId}
+          params={params}
           onChainChange={onChainChange}
           onPoolChange={setPoolId}
           onStrategyChange={onSelectStrategy}
+          onParamsChange={onParamsChange}
           onOpenLive={() => setMode("live")}
         />
       ) : (
@@ -111,6 +116,7 @@ export function QuantHub({ locale }: Props) {
           chain={chain}
           poolId={poolId}
           strategyId={strategyId}
+          params={params}
           onBackPaper={() => setMode("paper")}
         />
       )}

@@ -1,5 +1,23 @@
 export type StrategyId = "ma_cross" | "rsi_revert" | "grid";
 
+export type StrategyParamDef = {
+  key: string;
+  labelZh: string;
+  labelEn: string;
+  default: number;
+  min: number;
+  max: number;
+};
+
+export type StrategyPreset = {
+  id: string;
+  nameZh: string;
+  nameEn: string;
+  hintZh: string;
+  hintEn: string;
+  values: Record<string, number>;
+};
+
 export type StrategyDef = {
   id: StrategyId;
   nameZh: string;
@@ -11,7 +29,9 @@ export type StrategyDef = {
   introEn: string;
   suitableZh: string;
   suitableEn: string;
-  params: { key: string; labelZh: string; labelEn: string; default: number; min: number; max: number }[];
+  params: StrategyParamDef[];
+  /** 快捷页可选的预设参数方案 */
+  presets: StrategyPreset[];
 };
 
 export const QUANT_STRATEGIES: StrategyDef[] = [
@@ -31,6 +51,32 @@ export const QUANT_STRATEGIES: StrategyDef[] = [
       { key: "fast", labelZh: "快线周期", labelEn: "Fast MA", default: 7, min: 3, max: 30 },
       { key: "slow", labelZh: "慢线周期", labelEn: "Slow MA", default: 25, min: 10, max: 60 },
     ],
+    presets: [
+      {
+        id: "short",
+        nameZh: "短线",
+        nameEn: "Short",
+        hintZh: "反应快，信号多，震荡市易假突破",
+        hintEn: "Faster signals; more whipsaws in chop",
+        values: { fast: 5, slow: 15 },
+      },
+      {
+        id: "standard",
+        nameZh: "标准",
+        nameEn: "Standard",
+        hintZh: "均衡默认，适合多数趋势币",
+        hintEn: "Balanced default for trending pairs",
+        values: { fast: 7, slow: 25 },
+      },
+      {
+        id: "long",
+        nameZh: "长线",
+        nameEn: "Long",
+        hintZh: "过滤噪音，信号少但更稳",
+        hintEn: "Fewer but smoother signals",
+        values: { fast: 12, slow: 50 },
+      },
+    ],
   },
   {
     id: "rsi_revert",
@@ -49,6 +95,32 @@ export const QUANT_STRATEGIES: StrategyDef[] = [
       { key: "low", labelZh: "超卖线", labelEn: "Oversold", default: 30, min: 10, max: 40 },
       { key: "high", labelZh: "超买线", labelEn: "Overbought", default: 70, min: 60, max: 90 },
     ],
+    presets: [
+      {
+        id: "sensitive",
+        nameZh: "灵敏",
+        nameEn: "Sensitive",
+        hintZh: "更早触发，适合窄幅箱体",
+        hintEn: "Earlier triggers; tight ranges",
+        values: { period: 9, low: 35, high: 65 },
+      },
+      {
+        id: "standard",
+        nameZh: "标准",
+        nameEn: "Standard",
+        hintZh: "经典 14 / 30 / 70",
+        hintEn: "Classic 14 / 30 / 70",
+        values: { period: 14, low: 30, high: 70 },
+      },
+      {
+        id: "conservative",
+        nameZh: "保守",
+        nameEn: "Conservative",
+        hintZh: "门槛更高，减少频繁交易",
+        hintEn: "Stricter bands; fewer trades",
+        values: { period: 21, low: 25, high: 75 },
+      },
+    ],
   },
   {
     id: "grid",
@@ -66,9 +138,65 @@ export const QUANT_STRATEGIES: StrategyDef[] = [
       { key: "grids", labelZh: "网格数", labelEn: "Grid Count", default: 10, min: 4, max: 20 },
       { key: "rangePct", labelZh: "区间幅度 %", labelEn: "Range %", default: 8, min: 3, max: 20 },
     ],
+    presets: [
+      {
+        id: "tight",
+        nameZh: "密网格",
+        nameEn: "Tight",
+        hintZh: "格子多、区间窄，适合小幅震荡",
+        hintEn: "More grids, narrow band; small swings",
+        values: { grids: 15, rangePct: 5 },
+      },
+      {
+        id: "standard",
+        nameZh: "标准",
+        nameEn: "Standard",
+        hintZh: "10 格 ±8%，通用默认",
+        hintEn: "10 grids ±8%; general default",
+        values: { grids: 10, rangePct: 8 },
+      },
+      {
+        id: "wide",
+        nameZh: "宽网格",
+        nameEn: "Wide",
+        hintZh: "格子少、区间宽，波动大时用",
+        hintEn: "Fewer grids, wider band; high volatility",
+        values: { grids: 6, rangePct: 15 },
+      },
+    ],
   },
 ];
 
 export function getStrategy(id: StrategyId): StrategyDef {
   return QUANT_STRATEGIES.find((s) => s.id === id) ?? QUANT_STRATEGIES[0]!;
+}
+
+export function defaultParams(strategyId: StrategyId): Record<string, number> {
+  const s = getStrategy(strategyId);
+  const standard = s.presets.find((p) => p.id === "standard") ?? s.presets[0];
+  if (standard) return { ...standard.values };
+  return Object.fromEntries(s.params.map((p) => [p.key, p.default]));
+}
+
+export function matchPreset(strategyId: StrategyId, params: Record<string, number>): string | null {
+  const s = getStrategy(strategyId);
+  for (const preset of s.presets) {
+    const match = s.params.every((p) => (params[p.key] ?? p.default) === preset.values[p.key]);
+    if (match) return preset.id;
+  }
+  return null;
+}
+
+export function formatParamsSummary(
+  strategyId: StrategyId,
+  params: Record<string, number>,
+  zh: boolean,
+): string {
+  const s = getStrategy(strategyId);
+  return s.params
+    .map((p) => {
+      const v = params[p.key] ?? p.default;
+      return `${zh ? p.labelZh : p.labelEn} ${v}`;
+    })
+    .join(zh ? " · " : " · ");
 }

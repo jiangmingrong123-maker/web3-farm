@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { QUANT_POOLS, poolsForChain, type QuantChain } from "@/config/quant/markets";
 import { ChainPicker } from "@/components/quant/ChainPicker";
+import { StrategyParamsQuick } from "@/components/quant/StrategyParamsQuick";
 import { StrategyQuickCards } from "@/components/quant/StrategyQuickCards";
 import {
   getStrategy,
@@ -27,30 +28,28 @@ type Props = {
   chain: QuantChain;
   poolId: string;
   strategyId: StrategyId;
+  params: Record<string, number>;
   onChainChange: (chain: QuantChain) => void;
   onPoolChange: (poolId: string) => void;
   onStrategyChange: (id: StrategyId) => void;
+  onParamsChange: (params: Record<string, number>) => void;
   onOpenLive: () => void;
 };
-
-function defaultParams(strategyId: StrategyId): Record<string, number> {
-  const s = getStrategy(strategyId);
-  return Object.fromEntries(s.params.map((p) => [p.key, p.default]));
-}
 
 export function QuantQuickPanel({
   locale,
   chain,
   poolId,
   strategyId,
+  params,
   onChainChange,
   onPoolChange,
   onStrategyChange,
+  onParamsChange,
   onOpenLive,
 }: Props) {
   const t = useTranslations("quant");
   const zh = locale === "zh";
-  const params = useMemo(() => defaultParams(strategyId), [strategyId]);
   const [state, setState] = useState<PaperState | null>(null);
   const [price, setPrice] = useState<number | null>(null);
   const [signal, setSignal] = useState<"buy" | "sell" | "hold">("hold");
@@ -217,11 +216,20 @@ export function QuantQuickPanel({
       {/* 选策略 */}
       <section>
         <p className="mb-2 text-xs font-medium text-white/55">{t("quickPickStrategy")}</p>
-        <p className="mb-2 text-[10px] leading-relaxed text-white/35">{t("strategyIntroHint")}</p>
         <StrategyQuickCards
           locale={locale}
           strategyId={strategyId}
           onSelect={onStrategyChange}
+        />
+      </section>
+
+      <section>
+        <p className="mb-2 text-xs font-medium text-white/55">{t("quickPickParams")}</p>
+        <StrategyParamsQuick
+          locale={locale}
+          strategyId={strategyId}
+          params={params}
+          onChange={onParamsChange}
         />
       </section>
 

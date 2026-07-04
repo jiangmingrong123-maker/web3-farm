@@ -3,7 +3,7 @@
 import { useTranslations } from "next-intl";
 import { useAccount } from "wagmi";
 import type { StrategyId } from "@/config/quant/strategies";
-import { getStrategy } from "@/config/quant/strategies";
+import { formatParamsSummary, getStrategy } from "@/config/quant/strategies";
 import type { QuantChain } from "@/config/quant/markets";
 import { poolsForChain } from "@/config/quant/markets";
 
@@ -12,10 +12,11 @@ type Props = {
   chain: QuantChain;
   poolId: string;
   strategyId: StrategyId;
+  params: Record<string, number>;
   onBackPaper: () => void;
 };
 
-export function LiveTradePanel({ locale, chain, poolId, strategyId, onBackPaper }: Props) {
+export function LiveTradePanel({ locale, chain, poolId, strategyId, params, onBackPaper }: Props) {
   const t = useTranslations("quant");
   const zh = locale === "zh";
   const { isConnected, address } = useAccount();
@@ -48,6 +49,9 @@ export function LiveTradePanel({ locale, chain, poolId, strategyId, onBackPaper 
           </li>
           <li>
             {t("liveStrategy")}: {zh ? strat.nameZh : strat.nameEn}
+          </li>
+          <li>
+            {t("liveParams")}: {formatParamsSummary(strategyId, params, zh)}
           </li>
         </ul>
       </div>
