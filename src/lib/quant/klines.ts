@@ -30,40 +30,59 @@ const DEXSCREENER_CHAIN: Record<DexPool["chain"], string> = {
   bsc: "bsc",
 };
 
+const UA = "web3-farm-quant/1.0";
+
+const BINANCE_BASES = [
+  "https://data-api.binance.vision",
+  "https://api.binance.com",
+];
+
 async function fetchBinanceKlines(
   symbol: string,
   interval: MarketInterval,
   limit: number,
 ): Promise<Kline[]> {
-  const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${BINANCE_INTERVAL[interval]}&limit=${limit}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Binance kline fetch failed: ${res.status}`);
-  const rows = (await res.json()) as [
-    number,
-    string,
-    string,
-    string,
-    string,
-    string,
-  ][];
-  return rows.map((row) => ({
-    time: row[0]!,
-    open: parseFloat(row[1]!),
-    high: parseFloat(row[2]!),
-    low: parseFloat(row[3]!),
-    close: parseFloat(row[4]!),
-    volume: parseFloat(row[5]!),
-  }));
+  let lastStatus = 0;
+  for (const base of BINANCE_BASES) {
+    const url = `${base}/api/v3/klines?symbol=${symbol}&interval=${BINANCE_INTERVAL[interval]}&limit=${limit}`;
+    const res = await fetch(url, { headers: { "User-Agent": UA } });
+    lastStatus = res.status;
+    if (res.status === 403 || res.status === 451) continue;
+    if (!res.ok) throw new Error(`Binance kline fetch failed: ${res.status}`);
+    const rows = (await res.json()) as [
+      number,
+      string,
+      string,
+      string,
+      string,
+      string,
+    ][];
+    return rows.map((row) => ({
+      time: row[0]!,
+      open: parseFloat(row[1]!),
+      high: parseFloat(row[2]!),
+      low: parseFloat(row[3]!),
+      close: parseFloat(row[4]!),
+      volume: parseFloat(row[5]!),
+    }));
+  }
+  throw new Error(`Binance kline fetch failed: ${lastStatus || 403}`);
 }
 
 async function fetchBinancePrice(symbol: string): Promise<number> {
-  const url = `https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Binance price fetch failed: ${res.status}`);
-  const json = (await res.json()) as { price?: string };
-  const p = parseFloat(json.price ?? "0");
-  if (!p) throw new Error("No Binance price");
-  return p;
+  let lastStatus = 0;
+  for (const base of BINANCE_BASES) {
+    const url = `${base}/api/v3/ticker/price?symbol=${symbol}`;
+    const res = await fetch(url, { headers: { "User-Agent": UA } });
+    lastStatus = res.status;
+    if (res.status === 403 || res.status === 451) continue;
+    if (!res.ok) throw new Error(`Binance price fetch failed: ${res.status}`);
+    const json = (await res.json()) as { price?: string };
+    const p = parseFloat(json.price ?? "0");
+    if (!p) throw new Error("No Binance price");
+    return p;
+  }
+  throw new Error(`Binance price fetch failed: ${lastStatus || 403}`);
 }
 
 function resample4h(hourly: Kline[]): Kline[] {
@@ -93,50 +112,55 @@ export async function fetchPoolKlines(
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < CACHE_MS) return hit.data;
 
-  if (pool.priceFromBinance && pool.binanceSymbol) {
-    const data = await fetchBinanceKlines(pool.binanceSymbol, interval, limit);
-    cache.set(key, { at: Date.now(), data });
-    return data;
-  }
-
   const tf = GECKO_TF[interval];
   const fetchLimit = interval === "4h" ? Math.min(limit * 4, 400) : limit;
-  const url = `https://api.geckoterminal.com/api/v2/networks/${pool.geckoNetwork}/pools/${pool.poolAddress}/ohlcv/${tf}?aggregate=1&limit=${fetchLimit}`;
+  const geckoUrl = `https://api.geckoterminal.com/api/v2/networks/${pool.geckoNetwork}/pools/${pool.poolAddress}/ohlcv/${tf}?aggregate=1&limit=${fetchLimit}`;
 
-  const res = await fetch(url);
-  if (!res.ok) {
-    if (pool.binanceSymbol && (res.status === 404 || res.status === 429)) {
-      const data = await fetchBinanceKlines(pool.binanceSymbol, interval, limit);
+  const geckoRes = await fetch(geckoUrl, { headers: { "User-Agent": UA } });
+  if (geckoRes.ok) {
+    const json = (await geckoRes.json()) as {
+      data?: { attributes?: { ohlcv_list?: [number, number, number, number, number, number][] } };
+    };
+    const list = json.data?.attributes?.ohlcv_list ?? [];
+    let data: Kline[] = list
+      .map((row) => ({
+        time: row[0]! * 1000,
+        open: row[1]!,
+        high: row[2]!,
+        low: row[3]!,
+        close: row[4]!,
+        volume: row[5]!,
+      }))
+      .sort((a, b) => a.time - b.time);
+    if (interval === "4h") data = resample4h(data);
+    if (data.length > limit) data = data.slice(-limit);
+    if (data.length >= 30) {
       cache.set(key, { at: Date.now(), data });
       return data;
     }
-    if (res.status === 429) {
-      throw new Error("K 线请求过于频繁，请稍后重试");
-    }
-    throw new Error(`K 线暂无数据 (${res.status})，请换其他币种或稍后重试`);
   }
 
-  const json = (await res.json()) as {
-    data?: { attributes?: { ohlcv_list?: [number, number, number, number, number, number][] } };
-  };
-  const list = json.data?.attributes?.ohlcv_list ?? [];
+  if (pool.binanceSymbol) {
+    try {
+      const data = await fetchBinanceKlines(pool.binanceSymbol, interval, limit);
+      cache.set(key, { at: Date.now(), data });
+      return data;
+    } catch (e) {
+      if (geckoRes.status === 429) {
+        throw new Error("K 线请求过于频繁，请稍后重试");
+      }
+      throw e;
+    }
+  }
 
-  let data: Kline[] = list
-    .map((row) => ({
-      time: row[0]! * 1000,
-      open: row[1]!,
-      high: row[2]!,
-      low: row[3]!,
-      close: row[4]!,
-      volume: row[5]!,
-    }))
-    .sort((a, b) => a.time - b.time);
+  if (!geckoRes.ok) {
+    if (geckoRes.status === 429) {
+      throw new Error("K 线请求过于频繁，请稍后重试");
+    }
+    throw new Error(`K 线暂无数据 (${geckoRes.status})，请换其他币种或稍后重试`);
+  }
 
-  if (interval === "4h") data = resample4h(data);
-  if (data.length > limit) data = data.slice(-limit);
-
-  cache.set(key, { at: Date.now(), data });
-  return data;
+  throw new Error(`K 线数据不足，请换其他币种或稍后重试`);
 }
 
 /** 兼容旧调用：symbol 传 poolAddress */
@@ -168,7 +192,7 @@ export async function fetchPoolPrice(pool: DexPool): Promise<number> {
   }
   const chain = DEXSCREENER_CHAIN[pool.chain];
   const url = `https://api.dexscreener.com/latest/dex/pairs/${chain}/${pool.poolAddress}`;
-  const res = await fetch(url);
+  const res = await fetch(url, { headers: { "User-Agent": UA } });
   if (!res.ok) {
     if (pool.binanceSymbol) return fetchBinancePrice(pool.binanceSymbol);
     throw new Error(`Price fetch failed: ${res.status}`);
