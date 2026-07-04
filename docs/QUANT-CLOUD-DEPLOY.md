@@ -1,127 +1,100 @@
 # 量化 · 云端模拟（7×24）
 
-**不用买 VPS。** 用现有 Cloudflare Pages + KV；定时任务需 **额外一个小 Worker** 或 **免费外部 Cron**（见下文）。
+**不用买 VPS，也不用 cron-job.org。**  
+Pages 存状态 + **GitHub Actions 每 5 分钟调 API**（推荐）或 Cloudflare Worker。
 
 ---
 
-## 为什么找不到 Functions / Cron？
-
-你截图里的 **Settings** 只有：Build、Variables and secrets、**Bindings**、Runtime、General。
-
-**Cloudflare Pages 没有 Cron 定时任务功能**（官方对比表里 Pages = ❌，Workers = ✅）。  
-所以 **不会有「Functions → Cron triggers」** 这一项；这不是你漏配了。
-
-当前架构：
+## 架构
 
 | 组件 | 作用 |
 |------|------|
-| **Pages** | 网站 + API（`/api/quant/...`）+ KV 存模拟状态 |
-| **Worker 或外部 Cron** | 每 5 分钟 **调用一次** API，触发公式计算 |
+| **Cloudflare Pages** | 网站 + `/api/quant/...` + KV 存模拟 |
+| **GitHub Actions** | 每 5 分钟 POST `/api/quant/cron/tick` |
+| **CRON_SECRET** | Pages 与 GitHub 用同一串密钥校验 |
+
+Pages **没有 Cron 菜单**，这是正常的。
 
 ---
 
-## 第 1 步：KV（你已完成 ✅）
+## 第 1 步：KV（已完成 ✅）
 
-Bindings 里已有 **SWAP_KV** → `web3-farm-swap`，无需再改。
-
----
-
-## 第 2 步：设置密钥 CRON_SECRET
-
-1. **Pages 项目** → Settings → **Variables and secrets**
-2. **Add** → Type: **Secret**
-3. Name: `CRON_SECRET`  
-   Value: 自拟一串随机密码（例如 `MyFarmQuant2026_xK9p`）
-4. Environment: **Production**（Preview 也可加同一个）
-5. 保存后 **Deployments → Retry deployment**
+Bindings：**SWAP_KV** → `web3-farm-swap`
 
 ---
 
-## 第 3 步：选一种定时方式（二选一）
+## 第 2 步：Pages 密钥（已完成 ✅）
 
-### 方案 A · 免费外部 Cron（最简单，推荐先试）
-
-不用 Wrangler，5 分钟搞定：
-
-1. 打开 [https://cron-job.org](https://cron-job.org) 注册（免费）
-2. **Create cron job**
-   - **URL**: `https://web3-farm.pages.dev/api/quant/cron/tick`
-   - **Method**: POST
-   - **Headers** 添加一行：  
-     `x-cron-secret` = 你在第 2 步设的 `CRON_SECRET`
-   - **Schedule**: 每 5 分钟（或选 `*/5 * * * *`）
-3. 保存并启用
-
-**手动测试**（PowerShell，把密钥换成你的）：
-
-```powershell
-Invoke-WebRequest -Uri "https://web3-farm.pages.dev/api/quant/cron/tick" -Method POST -Headers @{ "x-cron-secret" = "你的CRON_SECRET" }
-```
-
-返回类似 `{"ok":true,"ticked":0}` 即 API 正常（ticked=0 表示当前没有人在跑云端模拟）。
+Variables and secrets → **CRON_SECRET**（Secret）→ Retry deployment
 
 ---
 
-### 方案 B · Cloudflare Worker（长期用，在 Dashboard 里能看到 Cron）
+## 第 3 步：GitHub 里存同一个密码（推荐）
 
-1. 安装 Wrangler（本机一次）：
+1. 打开 [https://github.com/jiangmingrong123-maker/web3-farm/settings/secrets/actions](https://github.com/jiangmingrong123-maker/web3-farm/settings/secrets/actions)
+2. **New repository secret**
+3. Name: **`CRON_SECRET`**
+4. Value: **与 Cloudflare Pages 里完全相同的那串**
+5. **Add secret**
+
+仓库里已有工作流：`.github/workflows/quant-cloud-tick.yml`  
+推送到 `main` 后，GitHub 会 **每 5 分钟** 自动调用一次。
+
+### 手动试跑（不等 5 分钟）
+
+1. GitHub 仓库 → **Actions**
+2. 左侧 **Quant cloud tick**
+3. **Run workflow** → **Run workflow**
+4. 点开这次运行，看日志里是否有 `HTTP 200` 和 `{"ok":true,...}`
+
+---
+
+## 第 4 步：网页开云端模拟
+
+1. [https://web3-farm.pages.dev/zh/quant/](https://web3-farm.pages.dev/zh/quant/)
+2. 连接钱包 → **云端模拟** → 选配置 → **开始云端模拟**
+3. 等 5～10 分钟刷新，看 **上次云端检查 / 已检查次数** 是否增加
+4. **可关页面**
+
+---
+
+## 备选：Cloudflare Worker（不用 GitHub Actions）
+
+若不想用 GitHub 定时：
 
 ```powershell
 cd D:\mygame\web3-farm\workers\quant-cron
 npm install -g wrangler
 wrangler login
-```
-
-2. 上传密钥（与 Pages 里 **相同** 的 CRON_SECRET）：
-
-```powershell
 wrangler secret put CRON_SECRET
-```
-
-3. 部署 Worker：
-
-```powershell
 wrangler deploy
 ```
 
-4. 在 Dashboard 验证：  
-   **Workers & Pages** → 列表里出现 **web3-farm-quant-cron**（类型是 **Worker**，不是 Pages）  
-   → 点进去 → **Settings** → **Triggers** → **Cron Triggers**  
-   应看到 `*/5 * * * *`
-
-> Worker 的 Cron 入口在 **Worker 项目**里，不在 web3-farm Pages 项目里。
+Dashboard → **Workers & Pages** → **web3-farm-quant-cron** → Settings → Triggers → Cron。
 
 ---
 
-## 第 4 步：网页上使用
+## 本机自测 API
 
-1. [https://web3-farm.pages.dev/zh/quant/](https://web3-farm.pages.dev/zh/quant/)
-2. **连接钱包** + 签名登录
-3. 选 **「云端模拟」** → 选币/策略/参数
-4. **开始云端模拟**（钱包再签一次）
-5. 等 5～10 分钟刷新，看 **「上次云端检查」「已检查次数」** 是否增加
-6. **可关页面**，定时任务会继续跑
+```powershell
+Invoke-WebRequest -Uri "https://web3-farm.pages.dev/api/quant/cron/tick" -Method POST -Headers @{ "x-cron-secret" = "你的CRON_SECRET" }
+```
+
+- `{"ok":true,"ticked":0}` → API 正常（0 = 还没人开云端模拟）
+- `401` → 密码不一致或未 Retry deployment
 
 ---
 
 ## 常见问题
 
-| 现象 | 原因 | 处理 |
-|------|------|------|
-| 找不到 Functions/Cron | Pages 不支持 | 用方案 A 或 B |
-| API 401 | CRON_SECRET 不对或未部署 | 检查 Pages 变量并 Retry deployment |
-| ticked 一直是 0 | 没人开云端模拟 | 先在网页点「开始云端模拟」 |
-| 长期只有「观望」 | 行情未触发规则 | 正常，可换币或回测 |
+| 现象 | 处理 |
+|------|------|
+| Actions 报 Missing CRON_SECRET | 完成第 3 步 GitHub Secret |
+| ticked 一直是 0 | 网页先点「开始云端模拟」 |
+| 长期「观望」 | 行情未触发规则，可换币/回测 |
 
 ---
 
 ## 费用
 
-- Pages + KV + Worker 免费额度对个人项目通常够用
-- **无需单独云服务器月租**
-
----
-
-## 与实盘
-
-云端模拟跑通后，实盘在同一套 Cron + KV 上增加 **钱包签名下单** 即可。
+GitHub Actions 公开仓库免费额度通常够用；无需 VPS。

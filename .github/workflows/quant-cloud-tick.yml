@@ -1,0 +1,26 @@
+# 每 5 分钟触发云端量化模拟 tick（无需 cron-job.org）
+name: Quant cloud tick
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    steps:
+      - name: POST quant cron tick
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "Missing GitHub secret CRON_SECRET — see docs/QUANT-CLOUD-DEPLOY.md"
+            exit 1
+          fi
+          code=$(curl -sS -o /tmp/quant-tick.json -w "%{http_code}" \
+            -X POST "https://web3-farm.pages.dev/api/quant/cron/tick" \
+            -H "x-cron-secret: ${CRON_SECRET}")
+          echo "HTTP ${code}"
+          cat /tmp/quant-tick.json
+          test "$code" = "200"
