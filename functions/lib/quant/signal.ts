@@ -9,7 +9,7 @@ export function latestSignal(
   klines: Kline[],
   params: Params,
 ): "buy" | "sell" | "hold" {
-  if (klines.length < 30) return "hold";
+  if (klines.length < 14) return "hold";
   const closes = klines.map((k) => k.close);
   const i = klines.length - 1;
 

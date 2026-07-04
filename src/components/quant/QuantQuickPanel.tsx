@@ -442,6 +442,11 @@ export function QuantQuickPanel({
       {cloudState?.lastError && paperMode === "cloud" && (
         <p className="rounded-lg border border-amber-500/30 bg-amber-950/20 px-3 py-2 text-[10px] text-amber-200/80">
           {cloudState.lastError}
+          <span className="mt-1 block text-[9px] text-white/35">
+            {zh
+              ? "若为旧报错：停止云端 → 重新开始；部署更新后约 3 分钟再试"
+              : "Stale error? Stop cloud → start again after deploy (~3 min)"}
+          </span>
         </p>
       )}
 
