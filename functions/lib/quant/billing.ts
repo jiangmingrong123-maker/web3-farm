@@ -1,33 +1,26 @@
 import { deductFarmPoints, loadFarmPoints, type FarmKv } from "../farm-points";
 
+/** 本机/云端模拟：一次性开通，开通后不再扣费 */
 export const QUANT_SIM_UNLOCK_POINTS = 100;
-export const QUANT_CLOUD_HOURLY_POINTS = 2;
-export const QUANT_CLOUD_DAILY_POINTS = 48;
 
 /** 实盘方案（暂未开放） */
 export const QUANT_LIVE_UNLOCK_POINTS = 10_000;
 export const QUANT_LIVE_HOURLY_POINTS = 20;
 export const QUANT_LIVE_DAILY_POINTS = 480;
 
-export const HOUR_MS = 60 * 60 * 1000;
-
 export type QuantBillingState = {
   simUnlocked: boolean;
   simUnlockedAt: number | null;
-  lastCloudHourlyAt: number | null;
   liveUnlocked: boolean;
   liveUnlockedAt: number | null;
-  lastLiveHourlyAt: number | null;
 };
 
 export function defaultQuantBilling(): QuantBillingState {
   return {
     simUnlocked: false,
     simUnlockedAt: null,
-    lastCloudHourlyAt: null,
     liveUnlocked: false,
     liveUnlockedAt: null,
-    lastLiveHourlyAt: null,
   };
 }
 
@@ -45,7 +38,15 @@ export async function loadQuantBilling(
     const raw = await kv.get(billingKey(wallet));
     if (!raw) return defaultQuantBilling();
     try {
-      return { ...defaultQuantBilling(), ...(JSON.parse(raw) as Partial<QuantBillingState>) };
+      const parsed = JSON.parse(raw) as Partial<QuantBillingState> & {
+        lastCloudHourlyAt?: number | null;
+      };
+      return {
+        simUnlocked: !!parsed.simUnlocked,
+        simUnlockedAt: parsed.simUnlockedAt ?? null,
+        liveUnlocked: !!parsed.liveUnlocked,
+        liveUnlockedAt: parsed.liveUnlockedAt ?? null,
+      };
     } catch {
       return defaultQuantBilling();
     }
@@ -68,8 +69,6 @@ export async function saveQuantBilling(
 export function quantPricingPublic() {
   return {
     simUnlock: QUANT_SIM_UNLOCK_POINTS,
-    cloudHourly: QUANT_CLOUD_HOURLY_POINTS,
-    cloudDaily: QUANT_CLOUD_DAILY_POINTS,
     liveUnlock: QUANT_LIVE_UNLOCK_POINTS,
     liveHourly: QUANT_LIVE_HOURLY_POINTS,
     liveDaily: QUANT_LIVE_DAILY_POINTS,
@@ -77,7 +76,7 @@ export function quantPricingPublic() {
   };
 }
 
-/** 开通模拟（一次性 100 积分，本机/云端共用） */
+/** 开通模拟（一次性 100 积分，本机/云端共用；已开通不再扣费） */
 export async function ensureSimUnlocked(
   kv: FarmKv | undefined,
   wallet: string,
@@ -113,76 +112,4 @@ export async function ensureSimUnlocked(
     farmPoints: deducted.remaining,
     pointsSpent: QUANT_SIM_UNLOCK_POINTS,
   };
-}
-
-export type HourlyBillingResult =
-  | { ok: true; billing: QuantBillingState; farmPoints: number; pointsSpent: number; hoursCharged: number }
-  | { ok: false; error: "INSUFFICIENT_POINTS"; billing: QuantBillingState; farmPoints: number; hoursOwed: number };
-
-/** 云端运行中：每满 1 小时扣 2 积分 */
-export async function processCloudHourlyBilling(
-  kv: FarmKv | undefined,
-  wallet: string,
-  cloudRunning: boolean,
-  cloudStartedAt: number | null,
-  now = Date.now(),
-): Promise<HourlyBillingResult & { shouldStop: boolean }> {
-  let billing = await loadQuantBilling(kv, wallet);
-  let farmPoints = await loadFarmPoints(kv, wallet);
-
-  if (!cloudRunning || !billing.simUnlocked) {
-    return { ok: true, billing, farmPoints, pointsSpent: 0, hoursCharged: 0, shouldStop: false };
-  }
-
-  const anchor = billing.lastCloudHourlyAt ?? cloudStartedAt ?? now;
-  const elapsed = now - anchor;
-  if (elapsed < HOUR_MS) {
-    return { ok: true, billing, farmPoints, pointsSpent: 0, hoursCharged: 0, shouldStop: false };
-  }
-
-  const hours = Math.floor(elapsed / HOUR_MS);
-  const cost = hours * QUANT_CLOUD_HOURLY_POINTS;
-
-  if (farmPoints < cost) {
-    return {
-      ok: false,
-      error: "INSUFFICIENT_POINTS",
-      billing,
-      farmPoints,
-      hoursOwed: hours,
-      shouldStop: true,
-    };
-  }
-
-  const deducted = await deductFarmPoints(kv, wallet, cost);
-  if (!deducted.ok) {
-    return {
-      ok: false,
-      error: "INSUFFICIENT_POINTS",
-      billing,
-      farmPoints,
-      hoursOwed: hours,
-      shouldStop: true,
-    };
-  }
-
-  billing = {
-    ...billing,
-    lastCloudHourlyAt: anchor + hours * HOUR_MS,
-  };
-  await saveQuantBilling(kv, wallet, billing);
-
-  return {
-    ok: true,
-    billing,
-    farmPoints: deducted.remaining,
-    pointsSpent: cost,
-    hoursCharged: hours,
-    shouldStop: false,
-  };
-}
-
-export function beginCloudHourlyAnchor(billing: QuantBillingState, now = Date.now()): QuantBillingState {
-  if (billing.lastCloudHourlyAt != null) return billing;
-  return { ...billing, lastCloudHourlyAt: now };
 }

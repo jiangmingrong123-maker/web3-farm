@@ -2,10 +2,6 @@ import { getPool } from "./markets";
 import { fetchPoolKlinesCached, fetchPoolPrice } from "./klines";
 import { latestSignal } from "./signal";
 import {
-  processCloudHourlyBilling,
-  QUANT_CLOUD_HOURLY_POINTS,
-} from "./billing";
-import {
   type CloudPaperState,
   paperBuy,
   paperEquity,
@@ -109,35 +105,6 @@ export async function tickPaperState(
 export async function tickWallet(kv: QuantKv | undefined, wallet: string): Promise<CloudPaperState | null> {
   const state = await loadPaper(kv, wallet);
   if (!state?.running) return state;
-
-  const hourly = await processCloudHourlyBilling(
-    kv,
-    wallet,
-    true,
-    state.startedAt,
-  );
-  if (hourly.shouldStop) {
-    const stopped: CloudPaperState = {
-      ...state,
-      running: false,
-      lastError: hourly.ok
-        ? null
-        : `积分不足，云端已停止（需 ${hourly.hoursOwed * QUANT_CLOUD_HOURLY_POINTS} 积分）`,
-      logs: [
-        {
-          time: Date.now(),
-          text: hourly.ok
-            ? "Cloud stopped"
-            : "Cloud stopped · insufficient hall points",
-        },
-        ...state.logs.slice(0, 49),
-      ],
-    };
-    await savePaper(kv, wallet, stopped);
-    await removeActiveWallet(kv, wallet);
-    return stopped;
-  }
-
   try {
     const next = await tickPaperState(state, kv);
     await savePaper(kv, wallet, next);

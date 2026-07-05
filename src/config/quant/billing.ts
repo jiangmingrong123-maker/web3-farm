@@ -1,7 +1,5 @@
 /** Keep in sync with functions/lib/quant/billing.ts */
 export const QUANT_SIM_UNLOCK_POINTS = 100;
-export const QUANT_CLOUD_HOURLY_POINTS = 2;
-export const QUANT_CLOUD_DAILY_POINTS = 48;
 
 export const QUANT_LIVE_UNLOCK_POINTS = 10_000;
 export const QUANT_LIVE_HOURLY_POINTS = 20;
@@ -11,14 +9,11 @@ export const QUANT_LIVE_ENABLED = false;
 export type QuantBillingInfo = {
   simUnlocked: boolean;
   simUnlockedAt: number | null;
-  lastCloudHourlyAt: number | null;
   liveUnlocked: boolean;
 };
 
 export type QuantPricing = {
   simUnlock: number;
-  cloudHourly: number;
-  cloudDaily: number;
   liveUnlock: number;
   liveHourly: number;
   liveDaily: number;
