@@ -25,9 +25,12 @@ import {
   type CloudPaperState,
 } from "../../lib/quant/paper";
 import {
+  beginCloudHourlyAnchor,
   ensureSimUnlocked,
   loadQuantBilling,
   quantPricingPublic,
+  QUANT_CLOUD_HOURLY_POINTS,
+  saveQuantBilling,
 } from "../../lib/quant/billing";
 import { loadFarmPoints } from "../../lib/farm-points";
 import type { StrategyId } from "../../lib/quant/markets";
@@ -162,6 +165,23 @@ export async function onRequest(context: {
       );
     }
 
+    const farmPoints = unlocked.farmPoints;
+    if (farmPoints < QUANT_CLOUD_HOURLY_POINTS) {
+      return json(
+        {
+          ok: false,
+          error: "INSUFFICIENT_POINTS",
+          need: QUANT_CLOUD_HOURLY_POINTS,
+          have: farmPoints,
+          reason: "cloud_hourly",
+        },
+        400,
+      );
+    }
+
+    const billing = beginCloudHourlyAnchor(unlocked.billing);
+    await saveQuantBilling(env.SWAP_KV, wallet, billing);
+
     const prev = (await loadPaper(env.SWAP_KV, wallet)) ?? defaultCloudPaperState();
     const next: CloudPaperState = {
       ...prev,
@@ -197,7 +217,7 @@ export async function onRequest(context: {
       ok: true,
       state: ticked,
       equity: snapshotEquity(ticked),
-      billing: unlocked.billing,
+      billing,
       farmPoints: await loadFarmPoints(env.SWAP_KV, wallet),
       pointsSpent: unlocked.pointsSpent,
       pricing: quantPricingPublic(),

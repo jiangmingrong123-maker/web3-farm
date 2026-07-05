@@ -17,6 +17,8 @@ import {
 import { latestSignal } from "@/lib/quant/backtest";
 import { fetchPoolKlines, fetchPoolPrice } from "@/lib/quant/klines";
 import {
+  QUANT_CLOUD_DAILY_POINTS,
+  QUANT_CLOUD_HOURLY_POINTS,
   QUANT_LIVE_DAILY_POINTS,
   QUANT_LIVE_ENABLED,
   QUANT_LIVE_UNLOCK_POINTS,
@@ -123,6 +125,8 @@ export function QuantQuickPanel({
   }, [address, onCloudSync, paperMode]);
 
   const simUnlockCost = pricing?.simUnlock ?? QUANT_SIM_UNLOCK_POINTS;
+  const cloudHourlyCost = pricing?.cloudHourly ?? QUANT_CLOUD_HOURLY_POINTS;
+  const cloudDailyCost = pricing?.cloudDaily ?? QUANT_CLOUD_DAILY_POINTS;
 
   const ensureSimUnlocked = useCallback(async (): Promise<boolean> => {
     if (!address) return false;
@@ -439,8 +443,8 @@ export function QuantQuickPanel({
           )}
         </p>
         <p className="mt-1">{t("billingSimUnlock", { points: simUnlockCost })}</p>
-        <p className="mt-0.5 text-white/40">{t("billingAfterUnlock")}</p>
-        <p className="mt-0.5 text-white/40">{t("billingLocalHint")}</p>
+        <p className="mt-0.5">{t("billingCloudHourly", { hourly: cloudHourlyCost, daily: cloudDailyCost })}</p>
+        <p className="mt-0.5 text-white/40">{t("billingLocalFree")}</p>
         {!QUANT_LIVE_ENABLED && (
           <p className="mt-1 border-t border-white/10 pt-1 text-white/35">
             {t("livePricingPlan", {
