@@ -93,14 +93,14 @@ export function QuantQuickPanel({
     setCloudKv(data.kv);
     setCloudState(data.state);
     if (data.equity != null) setCloudEquity(data.equity);
-    if (data.state?.running) {
+
+    // 云端配置以 KV 为准；刷新页面时覆盖 localStorage 里残留的本机选项（如 FLOKI）
+    if (paperMode === "cloud" && data.state?.marketId) {
       onCloudSync?.(data.state.marketId, data.state.strategyId, data.state.params);
-      if (data.state.lastPrice != null) setPrice(data.state.lastPrice);
-      if (data.state.lastSignal) setSignal(data.state.lastSignal);
-    } else if (paperMode === "local" || !data.state?.running) {
-      if (data.state?.lastPrice != null) setPrice(data.state.lastPrice);
-      if (data.state?.lastSignal) setSignal(data.state.lastSignal);
     }
+
+    if (data.state?.lastPrice != null) setPrice(data.state.lastPrice);
+    if (data.state?.lastSignal) setSignal(data.state.lastSignal);
   }, [address, onCloudSync, paperMode]);
 
   useEffect(() => {
@@ -215,6 +215,7 @@ export function QuantQuickPanel({
       }
       setCloudState(res.state);
       setCloudEquity(res.equity);
+      onCloudSync?.(res.state.marketId, res.state.strategyId, res.state.params);
       if (res.state.lastPrice != null) setPrice(res.state.lastPrice);
       if (res.state.lastSignal) setSignal(res.state.lastSignal);
     } catch (e) {
@@ -222,7 +223,7 @@ export function QuantQuickPanel({
     } finally {
       setLoading(false);
     }
-  }, [address, isConnected, cloudKv, poolId, strategyId, params, farmSign, t]);
+  }, [address, isConnected, cloudKv, poolId, strategyId, params, farmSign, t, onCloudSync]);
 
   const stopCloud = useCallback(async () => {
     if (!address) return;
@@ -255,12 +256,17 @@ export function QuantQuickPanel({
   }, [address, farmSign, t]);
 
   const cloudRunning = cloudState?.running ?? false;
-  const cloudPool = cloudState?.marketId
-    ? (QUANT_POOLS.find((p) => p.id === cloudState.marketId) ?? pool)
-    : pool;
-  const cloudStrat = cloudState?.strategyId
-    ? getStrategy(cloudState.strategyId)
-    : strat;
+  const activePoolId =
+    paperMode === "cloud" && cloudState?.marketId ? cloudState.marketId : poolId;
+  const activePool =
+    QUANT_POOLS.find((p) => p.id === activePoolId) ?? pool;
+  const cloudPool = activePool;
+  const activeStrategyId =
+    paperMode === "cloud" && cloudState?.strategyId ? cloudState.strategyId : strategyId;
+  const activeParams =
+    paperMode === "cloud" && cloudState?.params ? cloudState.params : params;
+  const cloudStrat = getStrategy(activeStrategyId);
+  const configLocked = paperMode === "cloud" && cloudRunning;
   const displayPrice =
     paperMode === "cloud" && cloudState?.lastPrice != null
       ? cloudState.lastPrice
@@ -279,12 +285,9 @@ export function QuantQuickPanel({
   const pnl = equity - 10_000;
   const pos =
     paperMode === "cloud"
-      ? cloudState?.positions.find((p) => p.marketId === (cloudState?.marketId ?? poolId))
+      ? cloudState?.positions.find((p) => p.marketId === activePoolId)
       : state?.positions.find((p) => p.marketId === poolId);
-  const posPool =
-    paperMode === "cloud" && cloudState?.marketId
-      ? (QUANT_POOLS.find((p) => p.id === cloudState.marketId) ?? pool)
-      : pool;
+  const posPool = activePool;
 
   const signalLabel = t(`signal_${displaySignal}`);
   const signalClass =
@@ -384,18 +387,23 @@ export function QuantQuickPanel({
 
       <section className="space-y-2">
         <p className="text-xs font-medium text-white/55">{t("quickPickChain")}</p>
-        <ChainPicker locale={locale} chain={chain} onChange={onChainChange} />
+        <ChainPicker
+          locale={locale}
+          chain={chain}
+          onChange={configLocked ? () => {} : onChainChange}
+        />
       </section>
 
       <section>
         <p className="mb-2 text-xs font-medium text-white/55">{t("quickPickCoin")}</p>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+        <div className={`grid grid-cols-2 gap-2 sm:grid-cols-3 ${configLocked ? "opacity-60" : ""}`}>
           {chainPools.map((p) => {
-            const active = poolId === p.id;
+            const active = activePoolId === p.id;
             return (
               <button
                 key={p.id}
                 type="button"
+                disabled={configLocked}
                 onClick={() => onPoolChange(p.id)}
                 className={`rounded-xl border px-3 py-3 text-left transition ${
                   active
@@ -411,17 +419,17 @@ export function QuantQuickPanel({
         </div>
       </section>
 
-      <section>
+      <section className={configLocked ? "opacity-60 pointer-events-none" : ""}>
         <p className="mb-2 text-xs font-medium text-white/55">{t("quickPickStrategy")}</p>
-        <StrategyQuickCards locale={locale} strategyId={strategyId} onSelect={onStrategyChange} />
+        <StrategyQuickCards locale={locale} strategyId={activeStrategyId} onSelect={onStrategyChange} />
       </section>
 
-      <section>
+      <section className={configLocked ? "opacity-60 pointer-events-none" : ""}>
         <p className="mb-2 text-xs font-medium text-white/55">{t("quickPickParams")}</p>
         <StrategyParamsQuick
           locale={locale}
-          strategyId={strategyId}
-          params={params}
+          strategyId={activeStrategyId}
+          params={activeParams}
           onChange={onParamsChange}
         />
       </section>

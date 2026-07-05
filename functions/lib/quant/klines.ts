@@ -112,6 +112,12 @@ async function fetchBinanceVisionPrice(symbol: string): Promise<number | null> {
 }
 
 export async function fetchPoolKlines(pool: DexPool, limit = 80): Promise<Kline[]> {
+  // 云端优先 Binance 公开数据域（Gecko/CG 在 Cloudflare 上常首包就失败）
+  if (pool.binanceSymbol) {
+    const bv = await fetchBinanceVisionKlines(pool.binanceSymbol, limit);
+    if (bv.length >= MIN_KLINE_BARS) return bv;
+  }
+
   const gecko = await fetchGeckoKlines(pool, limit);
   if (gecko.length >= MIN_KLINE_BARS) return gecko;
 
@@ -121,14 +127,9 @@ export async function fetchPoolKlines(pool: DexPool, limit = 80): Promise<Kline[
     if (cg.length >= MIN_KLINE_BARS) return cg;
   }
 
-  if (pool.binanceSymbol) {
-    const bv = await fetchBinanceVisionKlines(pool.binanceSymbol, limit);
-    if (bv.length >= MIN_KLINE_BARS) return bv;
-  }
-
   if (gecko.length > 0) return gecko;
 
-  throw new Error(`K线数据源繁忙(${pool.baseSymbol})，请稍后或换 WETH/LINK`);
+  throw new Error(`K线拉取失败(${pool.baseSymbol})，请停止云端后重试`);
 }
 
 export async function fetchPoolPrice(pool: DexPool): Promise<number> {

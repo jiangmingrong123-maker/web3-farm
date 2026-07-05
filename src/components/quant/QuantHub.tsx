@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { useTranslations } from "next-intl";
 import { BacktestPanel } from "@/components/quant/BacktestPanel";
 import { ConnectorsPanel } from "@/components/quant/ConnectorsPanel";
@@ -12,7 +12,6 @@ import { SignalsPanel } from "@/components/quant/SignalsPanel";
 import { StrategyPanel } from "@/components/quant/StrategyPanel";
 import { QUANT_POOLS, poolsForChain, type QuantChain } from "@/config/quant/markets";
 import { defaultParams, type StrategyId } from "@/config/quant/strategies";
-import { loadPaperState } from "@/lib/quant/paper-store";
 
 type Props = { locale: string };
 type QuantMode = "paper" | "live";
@@ -32,16 +31,6 @@ export function QuantHub({ locale }: Props) {
     "backtest",
   );
   const [params, setParams] = useState<Record<string, number>>(() => defaultParamsForStrategy("ma_cross"));
-
-  useEffect(() => {
-    const saved = loadPaperState();
-    if (saved.marketId) {
-      setPoolId(saved.marketId);
-      const savedPool = QUANT_POOLS.find((p) => p.id === saved.marketId);
-      if (savedPool) setChain(savedPool.chain);
-    }
-    if (saved.strategyId) setStrategyId(saved.strategyId);
-  }, []);
 
   const onSelectStrategy = useCallback((id: StrategyId) => {
     setStrategyId(id);
