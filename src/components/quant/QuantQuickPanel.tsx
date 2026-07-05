@@ -71,7 +71,6 @@ export function QuantQuickPanel({
   const [paperMode, setPaperMode] = useState<PaperMode>("cloud");
   const [state, setState] = useState<PaperState | null>(null);
   const [cloudState, setCloudState] = useState<CloudPaperState | null>(null);
-  const [cloudEquity, setCloudEquity] = useState<number>(10_000);
   const [cloudKv, setCloudKv] = useState(true);
   const [price, setPrice] = useState<number | null>(null);
   const [signal, setSignal] = useState<"buy" | "sell" | "hold">("hold");
@@ -97,7 +96,6 @@ export function QuantQuickPanel({
     if (!data) return;
     setCloudKv(data.kv);
     setCloudState(data.state);
-    if (data.equity != null) setCloudEquity(data.equity);
 
     // 仅在云端「运行中」时以 KV 为准（停止后用户可自由改币；避免每 20s 把选项打回去）
     if (paperMode === "cloud" && data.state?.running && data.state.marketId) {
@@ -126,8 +124,8 @@ export function QuantQuickPanel({
       const klines = await fetchPoolKlines(pool, "1h", 80);
       const p = await fetchPoolPrice(pool);
       const sig = latestSignal(strategyId, klines, params);
+      setPrice(p);
       if (paperMode === "local" || !cloudState?.running) {
-        setPrice(p);
         setSignal(sig);
       }
       return { p, sig };
@@ -219,7 +217,6 @@ export function QuantQuickPanel({
         return;
       }
       setCloudState(res.state);
-      setCloudEquity(res.equity);
       onCloudSync?.(res.state.marketId, res.state.strategyId, res.state.params);
       if (res.state.lastPrice != null) setPrice(res.state.lastPrice);
       if (res.state.lastSignal) setSignal(res.state.lastSignal);
@@ -251,7 +248,6 @@ export function QuantQuickPanel({
       const next = await resetCloudPaperApi(address, farmSign);
       if (next) {
         setCloudState(next);
-        setCloudEquity(10_000);
       } else setError(t("cloudActionFailed"));
     } catch {
       setError(t("cloudActionFailed"));
@@ -273,27 +269,28 @@ export function QuantQuickPanel({
     useCloudConfig && cloudState?.params ? cloudState.params : params;
   const cloudStrat = getStrategy(activeStrategyId);
   const configLocked = paperMode === "cloud" && cloudRunning;
-  const displayPrice =
-    paperMode === "cloud" && cloudState?.lastPrice != null
-      ? cloudState.lastPrice
-      : price;
+  const markPrice =
+    price ?? (paperMode === "cloud" ? cloudState?.lastPrice : null) ?? null;
+  const displayPrice = markPrice;
   const displaySignal =
     paperMode === "cloud" && cloudState?.lastSignal
       ? cloudState.lastSignal
       : signal;
 
-  const equity =
-    paperMode === "cloud"
-      ? cloudEquity
-      : state
-        ? paperEquity(state, price ?? 1)
-        : 10_000;
-  const pnl = equity - 10_000;
   const pos =
     paperMode === "cloud"
       ? cloudState?.positions.find((p) => p.marketId === activePoolId)
       : state?.positions.find((p) => p.marketId === poolId);
   const posPool = activePool;
+
+  const equity =
+    paperMode === "cloud" && cloudState
+      ? cloudState.cash +
+        (pos ? pos.qty * (markPrice ?? cloudState.lastPrice ?? 1) : 0)
+      : state
+        ? paperEquity(state, markPrice ?? 1)
+        : 10_000;
+  const pnl = equity - 10_000;
 
   const signalLabel = t(`signal_${displaySignal}`);
   const signalClass =
@@ -453,6 +450,13 @@ export function QuantQuickPanel({
           valueClass={pnl >= 0 ? "text-emerald-400" : "text-red-400"}
         />
       </div>
+
+      <p className="text-center text-[10px] leading-relaxed text-white/35">
+        {t("quickPriceHint")}
+        {paperMode === "cloud" && cloudRunning && (
+          <span className="block text-white/30">{t("cloudTradePriceNote")}</span>
+        )}
+      </p>
 
       {paperMode === "cloud" && cloudState?.lastTickAt && (
         <p className="text-center text-[10px] text-white/35">

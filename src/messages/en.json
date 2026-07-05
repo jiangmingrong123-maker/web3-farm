@@ -543,6 +543,8 @@
     "paramsTuneHide": "Hide",
     "paramsCustom": "Custom values — not a preset",
     "quickPrice": "Price",
+    "quickPriceHint": "Live DEX pool quote via DexScreener (refreshed ~every 60s)",
+    "cloudTradePriceNote": "Cloud fills use the price at each 5‑minute check, not tick‑by‑tick",
     "quickSignal": "Signal",
     "quickPnl": "Paper P&L",
     "quickHolding": "Hold {qty} {symbol} · avg ${avg}",

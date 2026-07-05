@@ -543,6 +543,8 @@
     "paramsTuneHide": "收起",
     "paramsCustom": "当前为自定义参数，非预设方案",
     "quickPrice": "现价",
+    "quickPriceHint": "现价来自 DexScreener 链上 DEX 池公开报价，约每 60 秒刷新",
+    "cloudTradePriceNote": "云端买卖成交以每 5 分钟检查时的价格为准（非实时逐笔）",
     "quickSignal": "当前信号",
     "quickPnl": "模拟盈亏",
     "quickHolding": "持仓 {qty} {symbol} · 成本 ${avg}",
