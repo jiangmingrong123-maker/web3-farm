@@ -1,4 +1,6 @@
 import type { StrategyId } from "./markets";
+import { getPool } from "./markets";
+import { fetchPoolPrice } from "./klines";
 
 export type PaperPosition = {
   marketId: string;
@@ -92,4 +94,36 @@ export function paperSell(state: CloudPaperState, price: number, pct = 1): Cloud
     ...next.logs.slice(0, 49),
   ];
   return next;
+}
+
+/** 停止云端后，按链上 DEX 现价卖出全部持仓 */
+export async function liquidateAllPositions(state: CloudPaperState): Promise<CloudPaperState> {
+  if (state.running) {
+    throw new Error("请先停止云端再清仓");
+  }
+  const open = state.positions.filter((p) => p.qty > 1e-12);
+  if (open.length === 0) {
+    throw new Error("当前无持仓");
+  }
+
+  let next = state;
+  let lastPrice = state.lastPrice;
+
+  for (const pos of open) {
+    const pool = getPool(pos.marketId);
+    const price = await fetchPoolPrice(pool);
+    lastPrice = price;
+    next = paperSell({ ...next, marketId: pos.marketId }, price, 1);
+  }
+
+  return {
+    ...next,
+    lastPrice,
+    lastSignal: "hold",
+    lastError: null,
+    logs: [
+      { time: Date.now(), text: "Manual liquidate · chain DEX price" },
+      ...next.logs.slice(0, 49),
+    ],
+  };
 }

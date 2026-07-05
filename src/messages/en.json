@@ -504,6 +504,8 @@
     "paperModeCloudHint": "Recommended",
     "cloudStart": "Start cloud paper",
     "cloudStop": "Stop cloud",
+    "cloudLiquidate": "Liquidate all (chain price)",
+    "cloudLiquidateHint": "Cloud must be stopped first; sells entire paper position at live DEX pool price",
     "cloudRunningHint": "Cloud running · checks ~every 5 min · tab can close",
     "cloudLastTick": "Last cloud check",
     "cloudTickCount": "Checks",

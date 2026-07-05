@@ -120,3 +120,17 @@ export async function resetCloudPaperApi(
   );
   return res?.ok && res.state ? res.state : null;
 }
+
+export async function liquidateCloudPaperApi(
+  wallet: string,
+  sign: QuantSignFn,
+): Promise<CloudPaperState | null> {
+  const res = await signedPost<{ ok?: boolean; state?: CloudPaperState; error?: string }>(
+    wallet,
+    "liquidate",
+    "quant_liquidate",
+    {},
+    sign,
+  );
+  return res?.ok && res.state ? res.state : null;
+}

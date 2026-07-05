@@ -504,6 +504,8 @@
     "paperModeCloudHint": "推荐 · 可关页",
     "cloudStart": "开始云端模拟",
     "cloudStop": "停止云端",
+    "cloudLiquidate": "一键清仓（链上现价）",
+    "cloudLiquidateHint": "须先停止云端；按当前链上 DEX 池价卖出全部模拟持仓",
     "cloudRunningHint": "云端运行中 · 约每 5 分钟自动检查 · 可关闭本页",
     "cloudLastTick": "上次云端检查",
     "cloudTickCount": "已检查",

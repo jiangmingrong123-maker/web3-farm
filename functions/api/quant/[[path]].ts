@@ -3,6 +3,7 @@
  * POST /api/quant/:wallet/start          — start cloud paper (wallet signature)
  * POST /api/quant/:wallet/stop           — stop cloud paper
  * POST /api/quant/:wallet/reset          — reset cloud paper
+ * POST /api/quant/:wallet/liquidate      — sell all positions at chain price (stopped only)
  * POST /api/quant/cron/tick              — manual cron (CRON_SECRET header)
  */
 
@@ -20,6 +21,7 @@ import {
 } from "../../lib/quant/tick";
 import {
   defaultCloudPaperState,
+  liquidateAllPositions,
   type CloudPaperState,
 } from "../../lib/quant/paper";
 import type { StrategyId } from "../../lib/quant/markets";
@@ -179,6 +181,27 @@ export async function onRequest(context: {
     await savePaper(env.SWAP_KV, wallet, next);
     await removeActiveWallet(env.SWAP_KV, wallet);
     return json({ ok: true, state: next, equity: snapshotEquity(next) });
+  }
+
+  if (action === "liquidate") {
+    const authErr = await requireWalletSignature("quant_liquidate", wallet, body);
+    if (authErr) return authErr;
+    const prev = await loadPaper(env.SWAP_KV, wallet);
+    if (!prev) return json({ ok: false, error: "not found" }, 404);
+    if (prev.running) {
+      return json({ ok: false, error: "stop cloud first" }, 400);
+    }
+    if (!prev.positions.some((p) => p.qty > 1e-12)) {
+      return json({ ok: false, error: "no position" }, 400);
+    }
+    try {
+      const next = await liquidateAllPositions(prev);
+      await savePaper(env.SWAP_KV, wallet, next);
+      return json({ ok: true, state: next, equity: snapshotEquity(next) });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "liquidate failed";
+      return json({ ok: false, error: msg }, 500);
+    }
   }
 
   if (action === "tick") {

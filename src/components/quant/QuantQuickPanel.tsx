@@ -18,6 +18,7 @@ import { latestSignal } from "@/lib/quant/backtest";
 import { fetchPoolKlines, fetchPoolPrice } from "@/lib/quant/klines";
 import {
   fetchCloudPaperApi,
+  liquidateCloudPaperApi,
   resetCloudPaperApi,
   startCloudPaperApi,
   stopCloudPaperApi,
@@ -256,6 +257,23 @@ export function QuantQuickPanel({
     }
   }, [address, farmSign, t]);
 
+  const liquidateCloud = useCallback(async () => {
+    if (!address) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const next = await liquidateCloudPaperApi(address, farmSign);
+      if (next) {
+        setCloudState(next);
+        if (next.lastPrice != null) setPrice(next.lastPrice);
+      } else setError(t("cloudActionFailed"));
+    } catch {
+      setError(t("cloudActionFailed"));
+    } finally {
+      setLoading(false);
+    }
+  }, [address, farmSign, t]);
+
   const cloudRunning = cloudState?.running ?? false;
   const useCloudConfig = paperMode === "cloud" && cloudRunning;
   const activePoolId =
@@ -291,6 +309,10 @@ export function QuantQuickPanel({
         ? paperEquity(state, markPrice ?? 1)
         : 10_000;
   const pnl = equity - 10_000;
+
+  const hasCloudPosition =
+    paperMode === "cloud" &&
+    (cloudState?.positions.some((p) => p.qty > 1e-12) ?? false);
 
   const signalLabel = t(`signal_${displaySignal}`);
   const signalClass =
@@ -548,6 +570,20 @@ export function QuantQuickPanel({
           {t("paperReset")}
         </button>
       </div>
+
+      {paperMode === "cloud" && !cloudRunning && hasCloudPosition && (
+        <div className="space-y-2">
+          <button
+            type="button"
+            disabled={loading || !isConnected}
+            onClick={() => void liquidateCloud()}
+            className="w-full rounded-xl border border-amber-500/45 bg-amber-950/35 py-3 text-sm font-semibold text-amber-200 hover:bg-amber-950/50 disabled:opacity-50"
+          >
+            {loading ? t("running") : t("cloudLiquidate")}
+          </button>
+          <p className="text-center text-[10px] text-white/35">{t("cloudLiquidateHint")}</p>
+        </div>
+      )}
 
       {paperMode === "cloud" && cloudRunning && (
         <p className="text-center text-[11px] text-cyan-400/80">{t("cloudRunningHint")}</p>
