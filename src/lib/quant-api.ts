@@ -1,5 +1,6 @@
 import { buildFarmSignMessage } from "./farm-sign";
 import { apiRoot } from "./api-origin";
+import type { QuantBillingInfo, QuantPricing } from "@/config/quant/billing";
 
 const API = `${apiRoot()}/quant`;
 
@@ -22,6 +23,14 @@ export type CloudPaperState = {
 
 export type QuantSignFn = (message: string) => Promise<`0x${string}`>;
 
+export type QuantApiError = {
+  ok: false;
+  error: string;
+  need?: number;
+  have?: number;
+  reason?: string;
+};
+
 async function signedPost<T>(
   wallet: string,
   subpath: string,
@@ -29,7 +38,7 @@ async function signedPost<T>(
   body: Record<string, unknown>,
   sign: QuantSignFn,
   data?: string,
-): Promise<T | null> {
+): Promise<T | QuantApiError> {
   try {
     const timestamp = Date.now();
     const message = buildFarmSignMessage(action, wallet, timestamp, data);
@@ -39,10 +48,11 @@ async function signedPost<T>(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...body, timestamp, signature }),
     });
-    if (!res.ok) return null;
-    return (await res.json()) as T;
+    const json = (await res.json()) as T & QuantApiError;
+    if (!res.ok) return json;
+    return json;
   } catch {
-    return null;
+    return { ok: false, error: "NETWORK" };
   }
 }
 
@@ -50,6 +60,9 @@ export async function fetchCloudPaperApi(wallet: string): Promise<{
   state: CloudPaperState | null;
   equity: number | null;
   kv: boolean;
+  billing: QuantBillingInfo | null;
+  farmPoints: number;
+  pricing: QuantPricing | null;
 } | null> {
   try {
     const res = await fetch(`${API}/${wallet.toLowerCase()}`, {
@@ -62,16 +75,54 @@ export async function fetchCloudPaperApi(wallet: string): Promise<{
       state?: CloudPaperState | null;
       equity?: number | null;
       kv?: boolean;
+      billing?: QuantBillingInfo;
+      farmPoints?: number;
+      pricing?: QuantPricing;
     };
     if (!data.ok) return null;
     return {
       state: data.state ?? null,
       equity: data.equity ?? null,
       kv: !!data.kv,
+      billing: data.billing ?? null,
+      farmPoints: data.farmPoints ?? 0,
+      pricing: data.pricing ?? null,
     };
   } catch {
     return null;
   }
+}
+
+export async function unlockSimQuantApi(
+  wallet: string,
+  sign: QuantSignFn,
+): Promise<
+  | { ok: true; billing: QuantBillingInfo; farmPoints: number; pointsSpent: number }
+  | QuantApiError
+> {
+  const res = await signedPost<{
+    ok?: boolean;
+    billing?: QuantBillingInfo;
+    farmPoints?: number;
+    pointsSpent?: number;
+    error?: string;
+    need?: number;
+    have?: number;
+  }>(wallet, "unlock-sim", "quant_unlock_sim", {}, sign);
+  if (!res.ok || !res.billing) {
+    return {
+      ok: false,
+      error: res.error ?? "FAILED",
+      need: res.need,
+      have: res.have,
+    };
+  }
+  return {
+    ok: true,
+    billing: res.billing,
+    farmPoints: res.farmPoints ?? 0,
+    pointsSpent: res.pointsSpent ?? 0,
+  };
 }
 
 export async function startCloudPaperApi(
@@ -82,15 +133,38 @@ export async function startCloudPaperApi(
     params: Record<string, number>;
   },
   sign: QuantSignFn,
-): Promise<{ state: CloudPaperState; equity: number } | null> {
-  const data = JSON.stringify(config);
+): Promise<
+  | { ok: true; state: CloudPaperState; farmPoints: number; pointsSpent: number; billing: QuantBillingInfo }
+  | QuantApiError
+> {
+  const dataStr = JSON.stringify(config);
   const res = await signedPost<{
     ok?: boolean;
     state?: CloudPaperState;
-    equity?: number;
-  }>(wallet, "start", "quant_start", config, sign, data);
-  if (!res?.ok || !res.state) return null;
-  return { state: res.state, equity: res.equity ?? 0 };
+    farmPoints?: number;
+    pointsSpent?: number;
+    billing?: QuantBillingInfo;
+    error?: string;
+    need?: number;
+    have?: number;
+    reason?: string;
+  }>(wallet, "start", "quant_start", config, sign, dataStr);
+  if (!res.ok || !res.state || !res.billing) {
+    return {
+      ok: false,
+      error: res.error ?? "FAILED",
+      need: res.need,
+      have: res.have,
+      reason: res.reason,
+    };
+  }
+  return {
+    ok: true,
+    state: res.state,
+    farmPoints: res.farmPoints ?? 0,
+    pointsSpent: res.pointsSpent ?? 0,
+    billing: res.billing,
+  };
 }
 
 export async function stopCloudPaperApi(
@@ -104,7 +178,8 @@ export async function stopCloudPaperApi(
     {},
     sign,
   );
-  return res?.ok && res.state ? res.state : null;
+  if ("error" in res || !res.ok || !res.state) return null;
+  return res.state;
 }
 
 export async function resetCloudPaperApi(
@@ -118,19 +193,21 @@ export async function resetCloudPaperApi(
     {},
     sign,
   );
-  return res?.ok && res.state ? res.state : null;
+  if ("error" in res || !res.ok || !res.state) return null;
+  return res.state;
 }
 
 export async function liquidateCloudPaperApi(
   wallet: string,
   sign: QuantSignFn,
 ): Promise<CloudPaperState | null> {
-  const res = await signedPost<{ ok?: boolean; state?: CloudPaperState; error?: string }>(
+  const res = await signedPost<{ ok?: boolean; state?: CloudPaperState }>(
     wallet,
     "liquidate",
     "quant_liquidate",
     {},
     sign,
   );
-  return res?.ok && res.state ? res.state : null;
+  if ("error" in res || !res.ok || !res.state) return null;
+  return res.state;
 }

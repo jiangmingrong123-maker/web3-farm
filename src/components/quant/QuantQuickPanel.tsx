@@ -17,11 +17,22 @@ import {
 import { latestSignal } from "@/lib/quant/backtest";
 import { fetchPoolKlines, fetchPoolPrice } from "@/lib/quant/klines";
 import {
+  QUANT_CLOUD_DAILY_POINTS,
+  QUANT_CLOUD_HOURLY_POINTS,
+  QUANT_LIVE_DAILY_POINTS,
+  QUANT_LIVE_ENABLED,
+  QUANT_LIVE_UNLOCK_POINTS,
+  QUANT_SIM_UNLOCK_POINTS,
+  type QuantBillingInfo,
+  type QuantPricing,
+} from "@/config/quant/billing";
+import {
   fetchCloudPaperApi,
   liquidateCloudPaperApi,
   resetCloudPaperApi,
   startCloudPaperApi,
   stopCloudPaperApi,
+  unlockSimQuantApi,
   type CloudPaperState,
 } from "@/lib/quant-api";
 import {
@@ -73,6 +84,9 @@ export function QuantQuickPanel({
   const [state, setState] = useState<PaperState | null>(null);
   const [cloudState, setCloudState] = useState<CloudPaperState | null>(null);
   const [cloudKv, setCloudKv] = useState(true);
+  const [farmPoints, setFarmPoints] = useState(0);
+  const [billing, setBilling] = useState<QuantBillingInfo | null>(null);
+  const [pricing, setPricing] = useState<QuantPricing | null>(null);
   const [price, setPrice] = useState<number | null>(null);
   const [signal, setSignal] = useState<"buy" | "sell" | "hold">("hold");
   const [loading, setLoading] = useState(false);
@@ -97,6 +111,9 @@ export function QuantQuickPanel({
     if (!data) return;
     setCloudKv(data.kv);
     setCloudState(data.state);
+    setFarmPoints(data.farmPoints);
+    if (data.billing) setBilling(data.billing);
+    if (data.pricing) setPricing(data.pricing);
 
     // 仅在云端「运行中」时以 KV 为准（停止后用户可自由改币；避免每 20s 把选项打回去）
     if (paperMode === "cloud" && data.state?.running && data.state.marketId) {
@@ -106,6 +123,32 @@ export function QuantQuickPanel({
     if (data.state?.lastPrice != null) setPrice(data.state.lastPrice);
     if (data.state?.lastSignal) setSignal(data.state.lastSignal);
   }, [address, onCloudSync, paperMode]);
+
+  const simUnlockCost = pricing?.simUnlock ?? QUANT_SIM_UNLOCK_POINTS;
+  const cloudHourlyCost = pricing?.cloudHourly ?? QUANT_CLOUD_HOURLY_POINTS;
+  const cloudDailyCost = pricing?.cloudDaily ?? QUANT_CLOUD_DAILY_POINTS;
+
+  const ensureSimUnlocked = useCallback(async (): Promise<boolean> => {
+    if (!address) return false;
+    if (billing?.simUnlocked) return true;
+    const res = await unlockSimQuantApi(address, farmSign);
+    if (!res.ok) {
+      if (res.error === "INSUFFICIENT_POINTS") {
+        setError(
+          t("billingInsufficient", {
+            need: res.need ?? simUnlockCost,
+            have: res.have ?? farmPoints,
+          }),
+        );
+      } else {
+        setError(t("cloudActionFailed"));
+      }
+      return false;
+    }
+    setBilling(res.billing);
+    setFarmPoints(res.farmPoints);
+    return true;
+  }, [address, billing?.simUnlocked, farmSign, farmPoints, simUnlockCost, t]);
 
   useEffect(() => {
     void refreshCloud();
@@ -169,6 +212,16 @@ export function QuantQuickPanel({
   }, [paperMode, previewTick, localTick]);
 
   const startSim = useCallback(async () => {
+    if (!address || !isConnected) {
+      setError(t("cloudNeedWallet"));
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    if (!(await ensureSimUnlocked())) {
+      setLoading(false);
+      return;
+    }
     const base = state ?? loadPaperState();
     const next: PaperState = {
       ...base,
@@ -188,7 +241,8 @@ export function QuantQuickPanel({
     persist(next);
     runningRef.current = true;
     await localTick();
-  }, [state, poolId, strategyId, pool, strat, zh, persist, localTick]);
+    setLoading(false);
+  }, [state, poolId, strategyId, pool, strat, zh, persist, localTick, address, isConnected, ensureSimUnlocked, t]);
 
   const stopSim = useCallback(() => {
     if (!state) return;
@@ -213,11 +267,22 @@ export function QuantQuickPanel({
         { marketId: poolId, strategyId, params },
         farmSign,
       );
-      if (!res) {
-        setError(t("cloudActionFailed"));
+      if (!res.ok) {
+        if (res.error === "INSUFFICIENT_POINTS") {
+          setError(
+            t("billingInsufficient", {
+              need: res.need ?? simUnlockCost,
+              have: res.have ?? farmPoints,
+            }),
+          );
+        } else {
+          setError(t("cloudActionFailed"));
+        }
         return;
       }
       setCloudState(res.state);
+      setFarmPoints(res.farmPoints);
+      setBilling(res.billing);
       onCloudSync?.(res.state.marketId, res.state.strategyId, res.state.params);
       if (res.state.lastPrice != null) setPrice(res.state.lastPrice);
       if (res.state.lastSignal) setSignal(res.state.lastSignal);
@@ -226,7 +291,7 @@ export function QuantQuickPanel({
     } finally {
       setLoading(false);
     }
-  }, [address, isConnected, cloudKv, poolId, strategyId, params, farmSign, t, onCloudSync]);
+  }, [address, isConnected, cloudKv, poolId, strategyId, params, farmSign, t, onCloudSync, simUnlockCost, farmPoints]);
 
   const stopCloud = useCallback(async () => {
     if (!address) return;
@@ -366,6 +431,30 @@ export function QuantQuickPanel({
             {t("paperModeLocalHint")}
           </span>
         </button>
+      </div>
+
+      <div className="rounded-xl border border-gold/25 bg-gold/5 px-3 py-2.5 text-[11px] leading-relaxed text-white/55">
+        <p className="font-medium text-gold/90">
+          {t("pointsBalance")}: {Math.floor(farmPoints)}
+          {billing?.simUnlocked ? (
+            <span className="ml-2 text-emerald-400/90">· {t("billingSimUnlocked")}</span>
+          ) : (
+            <span className="ml-2 text-white/40">· {t("billingSimLocked")}</span>
+          )}
+        </p>
+        <p className="mt-1">{t("billingSimUnlock", { points: simUnlockCost })}</p>
+        <p className="mt-0.5">
+          {t("billingCloudHourly", { hourly: cloudHourlyCost, daily: cloudDailyCost })}
+        </p>
+        <p className="mt-0.5 text-white/40">{t("billingLocalFree")}</p>
+        {!QUANT_LIVE_ENABLED && (
+          <p className="mt-1 border-t border-white/10 pt-1 text-white/35">
+            {t("livePricingPlan", {
+              unlock: pricing?.liveUnlock ?? QUANT_LIVE_UNLOCK_POINTS,
+              daily: pricing?.liveDaily ?? QUANT_LIVE_DAILY_POINTS,
+            })}
+          </p>
+        )}
       </div>
 
       <div className="rounded-xl border border-cyan-500/20 bg-cyan-950/20 px-3 py-2.5 text-xs leading-relaxed text-cyan-100/75">

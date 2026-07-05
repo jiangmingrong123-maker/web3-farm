@@ -36,6 +36,7 @@ export function LiveTradePanel({ locale, chain, poolId, strategyId, params, onBa
         </div>
         <h2 className="text-lg font-bold text-white/95">{t("liveTitle")}</h2>
         <p className="mt-2 text-xs leading-relaxed text-white/55">{t("liveIntro")}</p>
+        <p className="mt-2 text-[10px] leading-relaxed text-white/35">{t("livePricingPlan", { unlock: 10000, daily: 480 })}</p>
       </div>
 
       <div className="rounded-xl border border-white/10 bg-black/25 p-3">

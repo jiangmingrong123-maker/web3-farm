@@ -1,7 +1,7 @@
 /**
  * GET  /api/quant/:wallet              — load cloud paper state
- * POST /api/quant/:wallet/start          — start cloud paper (wallet signature)
- * POST /api/quant/:wallet/stop           — stop cloud paper
+ * POST /api/quant/:wallet/unlock-sim     — unlock paper sim (100 pts, once)
+ * POST /api/quant/:wallet/start            — start cloud paper (wallet signature)
  * POST /api/quant/:wallet/reset          — reset cloud paper
  * POST /api/quant/:wallet/liquidate      — sell all positions at chain price (stopped only)
  * POST /api/quant/cron/tick              — manual cron (CRON_SECRET header)
@@ -24,6 +24,15 @@ import {
   liquidateAllPositions,
   type CloudPaperState,
 } from "../../lib/quant/paper";
+import {
+  beginCloudHourlyAnchor,
+  ensureSimUnlocked,
+  loadQuantBilling,
+  quantPricingPublic,
+  QUANT_CLOUD_HOURLY_POINTS,
+  saveQuantBilling,
+} from "../../lib/quant/billing";
+import { loadFarmPoints } from "../../lib/farm-points";
 import type { StrategyId } from "../../lib/quant/markets";
 
 interface Env {
@@ -91,12 +100,17 @@ export async function onRequest(context: {
 
   if (request.method === "GET" && !action) {
     const state = await loadPaper(env.SWAP_KV, wallet);
+    const billing = await loadQuantBilling(env.SWAP_KV, wallet);
+    const farmPoints = await loadFarmPoints(env.SWAP_KV, wallet);
     return json({
       ok: true,
       exists: !!state,
       state,
       equity: state ? snapshotEquity(state) : null,
       kv: !!env.SWAP_KV,
+      billing,
+      farmPoints,
+      pricing: quantPricingPublic(),
     });
   }
 
@@ -111,6 +125,25 @@ export async function onRequest(context: {
     return json({ ok: false, error: "invalid json" }, 400);
   }
 
+  if (action === "unlock-sim") {
+    const authErr = await requireWalletSignature("quant_unlock_sim", wallet, body);
+    if (authErr) return authErr;
+    const unlocked = await ensureSimUnlocked(env.SWAP_KV, wallet);
+    if (!unlocked.ok) {
+      return json(
+        { ok: false, error: unlocked.error, need: unlocked.need, have: unlocked.have },
+        400,
+      );
+    }
+    return json({
+      ok: true,
+      billing: unlocked.billing,
+      farmPoints: unlocked.farmPoints,
+      pointsSpent: unlocked.pointsSpent,
+      pricing: quantPricingPublic(),
+    });
+  }
+
   if (action === "start") {
     const configData = JSON.stringify({
       marketId: body.marketId,
@@ -123,6 +156,31 @@ export async function onRequest(context: {
     if (!body.marketId || !isStrategyId(body.strategyId) || !body.params) {
       return json({ ok: false, error: "missing config" }, 400);
     }
+
+    const unlocked = await ensureSimUnlocked(env.SWAP_KV, wallet);
+    if (!unlocked.ok) {
+      return json(
+        { ok: false, error: unlocked.error, need: unlocked.need, have: unlocked.have },
+        400,
+      );
+    }
+
+    const farmPoints = unlocked.farmPoints;
+    if (farmPoints < QUANT_CLOUD_HOURLY_POINTS) {
+      return json(
+        {
+          ok: false,
+          error: "INSUFFICIENT_POINTS",
+          need: QUANT_CLOUD_HOURLY_POINTS,
+          have: farmPoints,
+          reason: "cloud_hourly",
+        },
+        400,
+      );
+    }
+
+    let billing = beginCloudHourlyAnchor(unlocked.billing);
+    await saveQuantBilling(env.SWAP_KV, wallet, billing);
 
     const prev = (await loadPaper(env.SWAP_KV, wallet)) ?? defaultCloudPaperState();
     const next: CloudPaperState = {
@@ -155,7 +213,15 @@ export async function onRequest(context: {
 
     await savePaper(env.SWAP_KV, wallet, ticked);
     await addActiveWallet(env.SWAP_KV, wallet);
-    return json({ ok: true, state: ticked, equity: snapshotEquity(ticked) });
+    return json({
+      ok: true,
+      state: ticked,
+      equity: snapshotEquity(ticked),
+      billing,
+      farmPoints: await loadFarmPoints(env.SWAP_KV, wallet),
+      pointsSpent: unlocked.pointsSpent,
+      pricing: quantPricingPublic(),
+    });
   }
 
   if (action === "stop") {
