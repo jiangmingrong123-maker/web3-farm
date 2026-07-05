@@ -94,8 +94,8 @@ export function QuantQuickPanel({
     setCloudState(data.state);
     if (data.equity != null) setCloudEquity(data.equity);
 
-    // 云端配置以 KV 为准；刷新页面时覆盖 localStorage 里残留的本机选项（如 FLOKI）
-    if (paperMode === "cloud" && data.state?.marketId) {
+    // 仅在云端「运行中」时以 KV 为准（停止后用户可自由改币；避免每 20s 把选项打回去）
+    if (paperMode === "cloud" && data.state?.running && data.state.marketId) {
       onCloudSync?.(data.state.marketId, data.state.strategyId, data.state.params);
     }
 
@@ -256,15 +256,16 @@ export function QuantQuickPanel({
   }, [address, farmSign, t]);
 
   const cloudRunning = cloudState?.running ?? false;
+  const useCloudConfig = paperMode === "cloud" && cloudRunning;
   const activePoolId =
-    paperMode === "cloud" && cloudState?.marketId ? cloudState.marketId : poolId;
+    useCloudConfig && cloudState?.marketId ? cloudState.marketId : poolId;
   const activePool =
     QUANT_POOLS.find((p) => p.id === activePoolId) ?? pool;
   const cloudPool = activePool;
   const activeStrategyId =
-    paperMode === "cloud" && cloudState?.strategyId ? cloudState.strategyId : strategyId;
+    useCloudConfig && cloudState?.strategyId ? cloudState.strategyId : strategyId;
   const activeParams =
-    paperMode === "cloud" && cloudState?.params ? cloudState.params : params;
+    useCloudConfig && cloudState?.params ? cloudState.params : params;
   const cloudStrat = getStrategy(activeStrategyId);
   const configLocked = paperMode === "cloud" && cloudRunning;
   const displayPrice =
@@ -473,7 +474,7 @@ export function QuantQuickPanel({
         </p>
       )}
 
-      {cloudState?.lastError && paperMode === "cloud" && (
+      {cloudState?.lastError && paperMode === "cloud" && cloudRunning && (
         <p className="rounded-lg border border-amber-500/30 bg-amber-950/20 px-3 py-2 text-[10px] text-amber-200/80">
           {cloudState.lastError}
           <span className="mt-1 block text-[9px] text-white/35">

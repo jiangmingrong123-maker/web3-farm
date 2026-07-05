@@ -166,7 +166,7 @@ export async function fetchPoolPrice(pool: DexPool): Promise<number> {
 }
 
 export function klineCacheKey(poolId: string) {
-  return `quant:klines:v2:${poolId}`;
+  return `quant:klines:v3:${poolId}`;
 }
 
 export const KLINE_CACHE_MS = 4 * 60 * 1000;

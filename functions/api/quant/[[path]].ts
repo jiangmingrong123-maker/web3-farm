@@ -164,6 +164,7 @@ export async function onRequest(context: {
     const next: CloudPaperState = {
       ...prev,
       running: false,
+      lastError: null,
       logs: [{ time: Date.now(), text: "Cloud stop" }, ...prev.logs.slice(0, 49)],
     };
     await savePaper(env.SWAP_KV, wallet, next);
