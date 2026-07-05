@@ -142,7 +142,7 @@ export async function onRequest(context: {
 
     let ticked = next;
     try {
-      ticked = await tickPaperState(next);
+      ticked = await tickPaperState(next, env.SWAP_KV);
     } catch (e) {
       ticked = {
         ...next,

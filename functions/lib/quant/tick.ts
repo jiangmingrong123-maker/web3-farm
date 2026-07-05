@@ -1,5 +1,5 @@
 import { getPool } from "./markets";
-import { fetchPoolKlines, fetchPoolPrice } from "./klines";
+import { fetchPoolKlinesCached, fetchPoolPrice } from "./klines";
 import { latestSignal } from "./signal";
 import {
   type CloudPaperState,
@@ -76,9 +76,12 @@ export async function removeActiveWallet(kv: QuantKv | undefined, wallet: string
   await saveActive(kv, list);
 }
 
-export async function tickPaperState(state: CloudPaperState): Promise<CloudPaperState> {
+export async function tickPaperState(
+  state: CloudPaperState,
+  kv?: QuantKv,
+): Promise<CloudPaperState> {
   const pool = getPool(state.marketId);
-  const klines = await fetchPoolKlines(pool, 80);
+  const klines = await fetchPoolKlinesCached(kv, pool, 80);
   const price = await fetchPoolPrice(pool);
   const signal = latestSignal(state.strategyId, klines, state.params);
 
@@ -103,7 +106,7 @@ export async function tickWallet(kv: QuantKv | undefined, wallet: string): Promi
   const state = await loadPaper(kv, wallet);
   if (!state?.running) return state;
   try {
-    const next = await tickPaperState(state);
+    const next = await tickPaperState(state, kv);
     await savePaper(kv, wallet, next);
     return next;
   } catch (e) {

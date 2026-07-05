@@ -40,6 +40,7 @@ type Props = {
   onStrategyChange: (id: StrategyId) => void;
   onParamsChange: (params: Record<string, number>) => void;
   onOpenLive: () => void;
+  onCloudSync?: (marketId: string, strategyId: StrategyId, params: Record<string, number>) => void;
 };
 
 type PaperMode = "local" | "cloud";
@@ -55,6 +56,7 @@ export function QuantQuickPanel({
   onStrategyChange,
   onParamsChange,
   onOpenLive,
+  onCloudSync,
 }: Props) {
   const t = useTranslations("quant");
   const zh = locale === "zh";
@@ -91,9 +93,15 @@ export function QuantQuickPanel({
     setCloudKv(data.kv);
     setCloudState(data.state);
     if (data.equity != null) setCloudEquity(data.equity);
-    if (data.state?.lastPrice != null) setPrice(data.state.lastPrice);
-    if (data.state?.lastSignal) setSignal(data.state.lastSignal);
-  }, [address]);
+    if (data.state?.running) {
+      onCloudSync?.(data.state.marketId, data.state.strategyId, data.state.params);
+      if (data.state.lastPrice != null) setPrice(data.state.lastPrice);
+      if (data.state.lastSignal) setSignal(data.state.lastSignal);
+    } else if (paperMode === "local" || !data.state?.running) {
+      if (data.state?.lastPrice != null) setPrice(data.state.lastPrice);
+      if (data.state?.lastSignal) setSignal(data.state.lastSignal);
+    }
+  }, [address, onCloudSync, paperMode]);
 
   useEffect(() => {
     void refreshCloud();
@@ -247,6 +255,12 @@ export function QuantQuickPanel({
   }, [address, farmSign, t]);
 
   const cloudRunning = cloudState?.running ?? false;
+  const cloudPool = cloudState?.marketId
+    ? (QUANT_POOLS.find((p) => p.id === cloudState.marketId) ?? pool)
+    : pool;
+  const cloudStrat = cloudState?.strategyId
+    ? getStrategy(cloudState.strategyId)
+    : strat;
   const displayPrice =
     paperMode === "cloud" && cloudState?.lastPrice != null
       ? cloudState.lastPrice
@@ -334,6 +348,18 @@ export function QuantQuickPanel({
         <p className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-[11px] leading-relaxed text-white/45">
           {t("autoTradeHow")}
         </p>
+      )}
+
+      {paperMode === "cloud" && cloudRunning && (
+        <div className="rounded-lg border border-cyan-500/35 bg-cyan-950/35 px-3 py-2 text-[11px] leading-relaxed text-cyan-100/85">
+          <p>
+            {t("cloudRunningAs", {
+              pair: `${cloudPool.baseSymbol}/${cloudPool.quoteSymbol}`,
+              strategy: zh ? cloudStrat.nameZh : cloudStrat.nameEn,
+            })}
+          </p>
+          <p className="mt-1 text-[10px] text-white/40">{t("cloudUiNote")}</p>
+        </div>
       )}
 
       {paperMode === "cloud" && !isConnected && (

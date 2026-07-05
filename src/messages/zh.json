@@ -511,6 +511,8 @@
     "cloudKvMissing": "云端存储未就绪：请在 Cloudflare 绑定 SWAP_KV 并配置 Cron，详见站内文档。",
     "cloudActionFailed": "操作失败，请重新签名或稍后重试。",
     "cloudIntro": "【云端模拟】虚拟 $10,000，状态存在 Cloudflare，定时任务自动跑公式。关页也继续；需连接钱包。",
+    "cloudRunningAs": "☁️ 云端正在跑：{pair} · {strategy}",
+    "cloudUiNote": "上方选币仅影响「重新开始」；运行中数据来自云端配置",
     "strategyIntroHint": "点击策略名称可查看规则说明（非投资建议）。",
     "liveBadge": "COMING SOON",
     "liveSubtitle": "钱包签名 · 非代操",

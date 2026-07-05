@@ -62,6 +62,17 @@ export function QuantHub({ locale }: Props) {
     if (first) setPoolId(first.id);
   }, []);
 
+  const onCloudSync = useCallback(
+    (marketId: string, sid: StrategyId, p: Record<string, number>) => {
+      setPoolId(marketId);
+      const pl = QUANT_POOLS.find((x) => x.id === marketId);
+      if (pl) setChain(pl.chain);
+      setStrategyId(sid);
+      setParams(p);
+    },
+    [],
+  );
+
   return (
     <div className="mx-auto max-w-lg space-y-4">
       <header className="text-center">
@@ -112,6 +123,7 @@ export function QuantHub({ locale }: Props) {
           onStrategyChange={onSelectStrategy}
           onParamsChange={onParamsChange}
           onOpenLive={() => setMode("live")}
+          onCloudSync={onCloudSync}
         />
       ) : (
         <LiveTradePanel
