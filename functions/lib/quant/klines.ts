@@ -12,27 +12,22 @@ export type Kline = {
 const UA = "web3-farm-quant/1.0";
 export const MIN_KLINE_BARS = 14;
 
-const CG_IDS: Record<string, string> = {
-  WETH: "weth",
-  WBTC: "wrapped-bitcoin",
-  LINK: "chainlink",
-  UNI: "uniswap",
-  FLOKI: "floki",
-  TOKEN: "tokenfi",
+const DEXSCREENER_CHAIN: Record<DexPool["chain"], string> = {
+  ethereum: "ethereum",
+  bsc: "bsc",
 };
-
-const BINANCE_VISION = "https://data-api.binance.vision";
 
 async function sleep(ms: number) {
   await new Promise((r) => setTimeout(r, ms));
 }
 
+/** GeckoTerminal：指定链上 DEX 池 OHLCV（eth / bsc） */
 async function fetchGeckoKlines(pool: DexPool, limit: number): Promise<Kline[]> {
   const url = `https://api.geckoterminal.com/api/v2/networks/${pool.geckoNetwork}/pools/${pool.poolAddress}/ohlcv/hour?aggregate=1&limit=${limit}`;
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < 4; attempt++) {
     const res = await fetch(url, { headers: { "User-Agent": UA } });
     if (res.status === 429) {
-      await sleep(1500 * (attempt + 1));
+      await sleep(2000 * (attempt + 1));
       continue;
     }
     if (!res.ok) return [];
@@ -54,119 +49,43 @@ async function fetchGeckoKlines(pool: DexPool, limit: number): Promise<Kline[]> 
   return [];
 }
 
-async function fetchCoinGeckoKlines(coinId: string, limit: number): Promise<Kline[]> {
-  const days = Math.min(30, Math.max(2, Math.ceil(limit / 20)));
-  const url = `https://api.coingecko.com/api/v3/coins/${coinId}/market_chart?vs_currency=usd&days=${days}`;
-  for (let attempt = 0; attempt < 3; attempt++) {
+async function fetchDexScreenerPrice(pool: DexPool): Promise<number | null> {
+  const chain = DEXSCREENER_CHAIN[pool.chain];
+  const url = `https://api.dexscreener.com/latest/dex/pairs/${chain}/${pool.poolAddress}`;
+  try {
     const res = await fetch(url, { headers: { "User-Agent": UA } });
-    if (res.status === 429) {
-      await sleep(2000 * (attempt + 1));
-      continue;
-    }
-    if (!res.ok) return [];
-    const json = (await res.json()) as { prices?: [number, number][] };
-    const prices = json.prices ?? [];
-    if (prices.length < 2) return [];
-
-    const out: Kline[] = [];
-    for (let i = 1; i < prices.length; i++) {
-      const [t0, p0] = prices[i - 1]!;
-      const [t1, p1] = prices[i]!;
-      out.push({
-        time: t1,
-        open: p0,
-        high: Math.max(p0, p1),
-        low: Math.min(p0, p1),
-        close: p1,
-        volume: 0,
-      });
-    }
-    return out.slice(-limit);
+    if (!res.ok) return null;
+    const json = (await res.json()) as { pair?: { priceUsd?: string } };
+    const p = parseFloat(json.pair?.priceUsd ?? "0");
+    return p > 0 ? p : null;
+  } catch {
+    return null;
   }
-  return [];
-}
-
-/** Cloudflare 上 api.binance.com 403；data-api.binance.vision 通常可用 */
-async function fetchBinanceVisionKlines(symbol: string, limit: number): Promise<Kline[]> {
-  const url = `${BINANCE_VISION}/api/v3/klines?symbol=${symbol}&interval=1h&limit=${limit}`;
-  const res = await fetch(url, { headers: { "User-Agent": UA } });
-  if (!res.ok) return [];
-  const rows = (await res.json()) as [number, string, string, string, string, string][];
-  return rows.map((row) => ({
-    time: row[0]!,
-    open: parseFloat(row[1]!),
-    high: parseFloat(row[2]!),
-    low: parseFloat(row[3]!),
-    close: parseFloat(row[4]!),
-    volume: parseFloat(row[5]!),
-  }));
-}
-
-async function fetchBinanceVisionPrice(symbol: string): Promise<number | null> {
-  const url = `${BINANCE_VISION}/api/v3/ticker/price?symbol=${symbol}`;
-  const res = await fetch(url, { headers: { "User-Agent": UA } });
-  if (!res.ok) return null;
-  const json = (await res.json()) as { price?: string };
-  const p = parseFloat(json.price ?? "0");
-  return p > 0 ? p : null;
 }
 
 export async function fetchPoolKlines(pool: DexPool, limit = 80): Promise<Kline[]> {
-  // 云端优先 Binance 公开数据域（Gecko/CG 在 Cloudflare 上常首包就失败）
-  if (pool.binanceSymbol) {
-    const bv = await fetchBinanceVisionKlines(pool.binanceSymbol, limit);
-    if (bv.length >= MIN_KLINE_BARS) return bv;
-  }
-
   const gecko = await fetchGeckoKlines(pool, limit);
   if (gecko.length >= MIN_KLINE_BARS) return gecko;
-
-  const cgId = CG_IDS[pool.baseSymbol];
-  if (cgId) {
-    const cg = await fetchCoinGeckoKlines(cgId, limit);
-    if (cg.length >= MIN_KLINE_BARS) return cg;
-  }
-
   if (gecko.length > 0) return gecko;
 
-  throw new Error(`K线拉取失败(${pool.baseSymbol})，请停止云端后重试`);
+  const chainLabel = pool.chain === "bsc" ? "BSC" : "Ethereum";
+  throw new Error(`链上K线不可用(${pool.baseSymbol}·${chainLabel})，请稍后重试`);
 }
 
 export async function fetchPoolPrice(pool: DexPool): Promise<number> {
-  const chain = pool.chain === "bsc" ? "bsc" : "ethereum";
-  const dexUrl = `https://api.dexscreener.com/latest/dex/pairs/${chain}/${pool.poolAddress}`;
-  try {
-    const res = await fetch(dexUrl, { headers: { "User-Agent": UA } });
-    if (res.ok) {
-      const json = (await res.json()) as { pair?: { priceUsd?: string } };
-      const p = parseFloat(json.pair?.priceUsd ?? "0");
-      if (p > 0) return p;
-    }
-  } catch {
-    /* fallback */
-  }
-
-  if (pool.binanceSymbol) {
-    const bp = await fetchBinanceVisionPrice(pool.binanceSymbol);
-    if (bp != null) return bp;
-  }
+  const spot = await fetchDexScreenerPrice(pool);
+  if (spot != null) return spot;
 
   const gecko = await fetchGeckoKlines(pool, 3);
   const last = gecko[gecko.length - 1]?.close;
   if (last && last > 0) return last;
 
-  const cgId = CG_IDS[pool.baseSymbol];
-  if (cgId) {
-    const cg = await fetchCoinGeckoKlines(cgId, 3);
-    const p = cg[cg.length - 1]?.close;
-    if (p && p > 0) return p;
-  }
-
-  throw new Error(`现价暂不可用(${pool.baseSymbol})`);
+  const chainLabel = pool.chain === "bsc" ? "BSC" : "Ethereum";
+  throw new Error(`链上现价不可用(${pool.baseSymbol}·${chainLabel})`);
 }
 
 export function klineCacheKey(poolId: string) {
-  return `quant:klines:v3:${poolId}`;
+  return `quant:klines:v4:${poolId}`;
 }
 
 export const KLINE_CACHE_MS = 4 * 60 * 1000;

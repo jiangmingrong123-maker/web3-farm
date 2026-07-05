@@ -19,71 +19,12 @@ const GECKO_TF: Record<MarketInterval, string> = {
   "1d": "day",
 };
 
-const BINANCE_INTERVAL: Record<MarketInterval, string> = {
-  "1h": "1h",
-  "4h": "4h",
-  "1d": "1d",
-};
-
 const DEXSCREENER_CHAIN: Record<DexPool["chain"], string> = {
   ethereum: "ethereum",
   bsc: "bsc",
 };
 
 const UA = "web3-farm-quant/1.0";
-
-const BINANCE_BASES = [
-  "https://data-api.binance.vision",
-  "https://api.binance.com",
-];
-
-async function fetchBinanceKlines(
-  symbol: string,
-  interval: MarketInterval,
-  limit: number,
-): Promise<Kline[]> {
-  let lastStatus = 0;
-  for (const base of BINANCE_BASES) {
-    const url = `${base}/api/v3/klines?symbol=${symbol}&interval=${BINANCE_INTERVAL[interval]}&limit=${limit}`;
-    const res = await fetch(url, { headers: { "User-Agent": UA } });
-    lastStatus = res.status;
-    if (res.status === 403 || res.status === 451) continue;
-    if (!res.ok) throw new Error(`Binance kline fetch failed: ${res.status}`);
-    const rows = (await res.json()) as [
-      number,
-      string,
-      string,
-      string,
-      string,
-      string,
-    ][];
-    return rows.map((row) => ({
-      time: row[0]!,
-      open: parseFloat(row[1]!),
-      high: parseFloat(row[2]!),
-      low: parseFloat(row[3]!),
-      close: parseFloat(row[4]!),
-      volume: parseFloat(row[5]!),
-    }));
-  }
-  throw new Error(`Binance kline fetch failed: ${lastStatus || 403}`);
-}
-
-async function fetchBinancePrice(symbol: string): Promise<number> {
-  let lastStatus = 0;
-  for (const base of BINANCE_BASES) {
-    const url = `${base}/api/v3/ticker/price?symbol=${symbol}`;
-    const res = await fetch(url, { headers: { "User-Agent": UA } });
-    lastStatus = res.status;
-    if (res.status === 403 || res.status === 451) continue;
-    if (!res.ok) throw new Error(`Binance price fetch failed: ${res.status}`);
-    const json = (await res.json()) as { price?: string };
-    const p = parseFloat(json.price ?? "0");
-    if (!p) throw new Error("No Binance price");
-    return p;
-  }
-  throw new Error(`Binance price fetch failed: ${lastStatus || 403}`);
-}
 
 function resample4h(hourly: Kline[]): Kline[] {
   const out: Kline[] = [];
@@ -102,7 +43,11 @@ function resample4h(hourly: Kline[]): Kline[] {
   return out;
 }
 
-/** 从 GeckoTerminal 拉取链上 DEX 池 OHLCV（Ethereum / BSC 等） */
+function chainLabel(pool: DexPool): string {
+  return pool.chain === "bsc" ? "BSC" : "Ethereum";
+}
+
+/** 从 GeckoTerminal 拉取链上 DEX 池 OHLCV（Ethereum / BSC） */
 export async function fetchPoolKlines(
   pool: DexPool,
   interval: MarketInterval,
@@ -140,27 +85,13 @@ export async function fetchPoolKlines(
     }
   }
 
-  if (pool.binanceSymbol) {
-    try {
-      const data = await fetchBinanceKlines(pool.binanceSymbol, interval, limit);
-      cache.set(key, { at: Date.now(), data });
-      return data;
-    } catch (e) {
-      if (geckoRes.status === 429) {
-        throw new Error("K 线请求过于频繁，请稍后重试");
-      }
-      throw e;
-    }
+  if (geckoRes.status === 429) {
+    throw new Error("链上 K 线请求过于频繁，请稍后重试");
   }
-
   if (!geckoRes.ok) {
-    if (geckoRes.status === 429) {
-      throw new Error("K 线请求过于频繁，请稍后重试");
-    }
-    throw new Error(`K 线暂无数据 (${geckoRes.status})，请换其他币种或稍后重试`);
+    throw new Error(`链上 K 线暂无数据 (${chainLabel(pool)} · ${geckoRes.status})`);
   }
-
-  throw new Error(`K 线数据不足，请换其他币种或稍后重试`);
+  throw new Error(`链上 K 线数据不足 (${pool.baseSymbol}·${chainLabel(pool)})`);
 }
 
 /** 兼容旧调用：symbol 传 poolAddress */
@@ -185,25 +116,22 @@ export async function fetchKlines(
   );
 }
 
-/** 链上池当前价（DexScreener）或 Binance 现货 */
+/** 链上 DEX 池现价（DexScreener）；备用同池最新 K 线收盘价 */
 export async function fetchPoolPrice(pool: DexPool): Promise<number> {
-  if (pool.priceFromBinance && pool.binanceSymbol) {
-    return fetchBinancePrice(pool.binanceSymbol);
-  }
   const chain = DEXSCREENER_CHAIN[pool.chain];
   const url = `https://api.dexscreener.com/latest/dex/pairs/${chain}/${pool.poolAddress}`;
   const res = await fetch(url, { headers: { "User-Agent": UA } });
-  if (!res.ok) {
-    if (pool.binanceSymbol) return fetchBinancePrice(pool.binanceSymbol);
-    throw new Error(`Price fetch failed: ${res.status}`);
+  if (res.ok) {
+    const json = (await res.json()) as { pair?: { priceUsd?: string } };
+    const p = parseFloat(json.pair?.priceUsd ?? "0");
+    if (p > 0) return p;
   }
-  const json = (await res.json()) as { pair?: { priceUsd?: string } };
-  const p = parseFloat(json.pair?.priceUsd ?? "0");
-  if (!p) {
-    if (pool.binanceSymbol) return fetchBinancePrice(pool.binanceSymbol);
-    throw new Error("No on-chain price");
-  }
-  return p;
+
+  const klines = await fetchPoolKlines(pool, "1h", 3).catch(() => null);
+  const last = klines?.[klines.length - 1]?.close;
+  if (last && last > 0) return last;
+
+  throw new Error(`链上现价不可用 (${pool.baseSymbol}·${chainLabel(pool)})`);
 }
 
 export async function fetchLastPrice(poolAddress: string): Promise<number> {
