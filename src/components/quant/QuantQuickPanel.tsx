@@ -8,7 +8,12 @@ import { ChainPicker } from "@/components/quant/ChainPicker";
 import { StrategyParamsQuick } from "@/components/quant/StrategyParamsQuick";
 import { StrategyQuickCards } from "@/components/quant/StrategyQuickCards";
 import { getStrategy, type StrategyId } from "@/config/quant/strategies";
-import { formatUsdPrice, formatUsdPriceLabel } from "@/lib/quant/format-price";
+import {
+  formatUsdEquityLabel,
+  formatUsdPnlLabel,
+  formatUsdPrice,
+  formatUsdPriceLabel,
+} from "@/lib/quant/format-price";
 import { latestSignal } from "@/lib/quant/backtest";
 import { fetchPoolKlines, fetchPoolPrice } from "@/lib/quant/klines";
 import {
@@ -441,10 +446,10 @@ export function QuantQuickPanel({
           value={displayPrice != null ? formatUsdPriceLabel(displayPrice, locale) : "—"}
         />
         <MiniStat label={t("quickSignal")} value={signalLabel} valueClass={signalClass} />
-        <MiniStat label={t("paperEquity")} value={`$${equity.toFixed(0)}`} />
+        <MiniStat label={t("paperEquity")} value={formatUsdEquityLabel(equity, locale)} />
         <MiniStat
           label={t("quickPnl")}
-          value={`${pnl >= 0 ? "+" : ""}$${pnl.toFixed(0)}`}
+          value={formatUsdPnlLabel(pnl, locale)}
           valueClass={pnl >= 0 ? "text-emerald-400" : "text-red-400"}
         />
       </div>

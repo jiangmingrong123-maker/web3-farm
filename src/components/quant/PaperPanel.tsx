@@ -7,6 +7,7 @@ import { StrategyParams } from "@/components/quant/StrategyPanel";
 import { QUANT_POOLS } from "@/config/quant/markets";
 import type { StrategyId } from "@/config/quant/strategies";
 import { latestSignal } from "@/lib/quant/backtest";
+import { formatUsdEquityLabel } from "@/lib/quant/format-price";
 import { fetchPoolKlines, fetchPoolPrice } from "@/lib/quant/klines";
 import {
   loadPaperState,
@@ -93,8 +94,8 @@ export function PaperPanel({ locale, strategyId, params, onParams }: Props) {
 
       <QuantCard title={t("paperAccount")}>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <Stat label={t("paperCash")} value={`$${state.cash.toFixed(0)}`} />
-          <Stat label={t("paperEquity")} value={`$${equity.toFixed(0)}`} />
+          <Stat label={t("paperCash")} value={formatUsdEquityLabel(state.cash, locale)} />
+          <Stat label={t("paperEquity")} value={formatUsdEquityLabel(equity, locale)} />
           <Stat
             label={t("paperPosition")}
             value={pos ? `${pos.qty.toFixed(4)} ${pool.baseSymbol}` : "—"}

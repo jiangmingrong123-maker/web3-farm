@@ -20,3 +20,20 @@ export function formatUsdPrice(price: number, locale: string): string {
 export function formatUsdPriceLabel(price: number, locale: string): string {
   return `$${formatUsdPrice(price, locale)}`;
 }
+
+/** 账户总资产 / 盈亏等 USD 金额（固定 2 位小数） */
+export function formatUsdAmount(amount: number, locale: string, fractionDigits = 2): string {
+  return amount.toLocaleString(locale, {
+    minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: fractionDigits,
+  });
+}
+
+export function formatUsdEquityLabel(equity: number, locale: string): string {
+  return `$${formatUsdAmount(equity, locale)}`;
+}
+
+export function formatUsdPnlLabel(pnl: number, locale: string): string {
+  const sign = pnl >= 0 ? "+" : "-";
+  return `${sign}$${formatUsdAmount(Math.abs(pnl), locale)}`;
+}
