@@ -1,0 +1,259 @@
+#!/usr/bin/env python3
+"""
+Attach local images to existing Shopify products (matched by handle).
+
+Use this after CSV import. Each subfolder in 合集 is parsed to a product
+handle (same logic as generate-shopify-products-csv.py).
+
+Prereqs (one-time):
+  Shopify Admin → Settings → Apps → Develop apps → Create app
+  Admin API scopes: read_products, write_products
+  Install app → copy Admin API access token (shpat_...)
+
+Env:
+  SHOPIFY_STORE=zhang-hongming-zisha-studio
+  SHOPIFY_ADMIN_TOKEN=shpat_...
+
+Usage:
+  python scripts/shopify-bulk-upload-images.py "path/to/合集" --dry-run
+  python scripts/shopify-bulk-upload-images.py "path/to/合集"
+  python scripts/shopify-bulk-upload-images.py "path/to/合集" --limit 5
+  python scripts/shopify-bulk-upload-images.py "path/to/合集" --force
+"""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import importlib.util
+import json
+import os
+import re
+import sys
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+_gen_path = Path(__file__).resolve().parent / "generate-shopify-products-csv.py"
+_spec = importlib.util.spec_from_file_location("shopify_gen", _gen_path)
+shopify_gen = importlib.util.module_from_spec(_spec)
+assert _spec.loader
+_spec.loader.exec_module(shopify_gen)
+parse_folder = shopify_gen.parse_folder
+SKIP_HANDLES = shopify_gen.SKIP_HANDLES
+
+API_VERSION = "2024-10"
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+REQUEST_DELAY_SEC = 0.55
+
+
+def api_request(
+    store: str,
+    token: str,
+    method: str,
+    path: str,
+    payload: dict | None = None,
+) -> tuple[dict, dict[str, str]]:
+    url = f"https://{store}.myshopify.com/admin/api/{API_VERSION}{path}"
+    data = json.dumps(payload).encode() if payload is not None else None
+    req = urllib.request.Request(
+        url,
+        data=data,
+        headers={
+            "Content-Type": "application/json",
+            "X-Shopify-Access-Token": token,
+        },
+        method=method,
+    )
+    with urllib.request.urlopen(req, timeout=120) as resp:
+        raw = resp.read().decode()
+        body = json.loads(raw) if raw else {}
+        headers = {k: v for k, v in resp.headers.items()}
+    return body, headers
+
+
+def parse_next_link(link_header: str) -> str | None:
+    if not link_header:
+        return None
+    for part in link_header.split(","):
+        if 'rel="next"' in part:
+            m = re.search(r"<([^>]+)>", part)
+            return m.group(1) if m else None
+    return None
+
+
+def fetch_products_index(store: str, token: str) -> dict[str, dict]:
+    """handle -> {id, image_count}"""
+    index: dict[str, dict] = {}
+    path = "/products.json?limit=250&fields=id,handle,images"
+    while path:
+        body, headers = api_request(store, token, "GET", path)
+        for product in body.get("products", []):
+            images = product.get("images") or []
+            index[product["handle"]] = {
+                "id": str(product["id"]),
+                "image_count": len(images),
+            }
+        next_url = parse_next_link(headers.get("Link", ""))
+        if next_url:
+            prefix = f"https://{store}.myshopify.com/admin/api/{API_VERSION}"
+            path = next_url.replace(prefix, "")
+        else:
+            path = ""
+        time.sleep(REQUEST_DELAY_SEC)
+    return index
+
+
+def upload_image(
+    store: str, token: str, product_id: str, image_path: Path, position: int
+) -> None:
+    body, _ = api_request(
+        store,
+        token,
+        "POST",
+        f"/products/{product_id}/images.json",
+        {
+            "image": {
+                "attachment": base64.b64encode(image_path.read_bytes()).decode(),
+                "filename": image_path.name,
+                "position": position,
+            }
+        },
+    )
+    if "image" not in body:
+        raise RuntimeError(f"upload failed for {image_path.name}: {body}")
+
+
+def image_files(folder: Path) -> list[Path]:
+    return sorted(
+        p for p in folder.iterdir() if p.is_file() and p.suffix.lower() in IMAGE_EXTS
+    )
+
+
+def should_skip_folder(folder_name: str) -> bool:
+    if "掇球" in folder_name and "张洪明" in folder_name:
+        return True
+    row = parse_folder(folder_name)
+    return bool(row and row["Handle"] in SKIP_HANDLES)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Upload 合集 folder images to existing Shopify products"
+    )
+    parser.add_argument("root", type=Path, help="Path to 合集 folder")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="List matches only; do not upload",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=0,
+        help="Max folders to process (0 = all)",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Upload even if product already has images",
+    )
+    args = parser.parse_args()
+
+    if not args.root.is_dir():
+        print(f"Not a directory: {args.root}", file=sys.stderr)
+        sys.exit(1)
+
+    store = os.environ.get("SHOPIFY_STORE", "zhang-hongming-zisha-studio")
+    token = os.environ.get("SHOPIFY_ADMIN_TOKEN", "")
+    if not token and not args.dry_run:
+        print("Set SHOPIFY_ADMIN_TOKEN env var (or use --dry-run).", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Store: {store}.myshopify.com")
+    products = fetch_products_index(store, token) if not args.dry_run else {}
+    if not args.dry_run:
+        print(f"Loaded {len(products)} products from Shopify")
+
+    folders = sorted(p for p in args.root.iterdir() if p.is_dir())
+    stats = {
+        "uploaded": 0,
+        "skipped_has_images": 0,
+        "skipped_no_images": 0,
+        "skipped_listed": 0,
+        "skipped_bad_name": 0,
+        "not_found": 0,
+        "errors": 0,
+    }
+    not_found: list[str] = []
+    processed = 0
+
+    for folder in folders:
+        if args.limit and processed >= args.limit:
+            break
+
+        name = folder.name
+        if should_skip_folder(name):
+            print(f"skip (manual listing): {name}")
+            stats["skipped_listed"] += 1
+            continue
+
+        row = parse_folder(name)
+        if not row:
+            print(f"skip (bad folder name): {name}", file=sys.stderr)
+            stats["skipped_bad_name"] += 1
+            continue
+
+        handle = row["Handle"]
+        imgs = image_files(folder)
+        if not imgs:
+            print(f"skip (no images in folder): {name}")
+            stats["skipped_no_images"] += 1
+            continue
+
+        if args.dry_run:
+            print(f"[dry-run] {name} -> {handle} ({len(imgs)} images)")
+            processed += 1
+            continue
+
+        product = products.get(handle)
+        if not product:
+            print(f"NOT FOUND in Shopify: {handle}  ({name})", file=sys.stderr)
+            not_found.append(f"{name} -> {handle}")
+            stats["not_found"] += 1
+            continue
+
+        if product["image_count"] > 0 and not args.force:
+            print(f"skip (already has images): {handle}")
+            stats["skipped_has_images"] += 1
+            continue
+
+        product_id = product["id"]
+        start_pos = product["image_count"] + 1
+        print(f"uploading {name} -> {handle} ({len(imgs)} images)")
+        try:
+            for i, img in enumerate(imgs):
+                upload_image(store, token, product_id, img, start_pos + i)
+                print(f"  + {img.name}")
+                time.sleep(REQUEST_DELAY_SEC)
+            stats["uploaded"] += 1
+            processed += 1
+        except (urllib.error.HTTPError, RuntimeError) as exc:
+            detail = exc.read().decode() if isinstance(exc, urllib.error.HTTPError) else str(exc)
+            print(f"  ERROR: {detail}", file=sys.stderr)
+            stats["errors"] += 1
+
+    print("\n--- summary ---")
+    for key, value in stats.items():
+        print(f"{key}: {value}")
+    if not_found:
+        print("\nHandles not found in Shopify (check CSV import handles):")
+        for line in not_found[:20]:
+            print(f"  {line}")
+        if len(not_found) > 20:
+            print(f"  ... and {len(not_found) - 20} more")
+
+
+if __name__ == "__main__":
+    main()
