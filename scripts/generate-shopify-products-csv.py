@@ -2,11 +2,10 @@
 """
 Generate Shopify product import CSV from folder names.
 
-Folder name format:
-  {price}{name} {clay} {capacity} {craft} {author}
-Example:
+Folder name examples:
   800鸿运 紫泥 180毫升 精工半手 郁佳骅
-  7000掇球 底槽清 230毫升 全手 张洪明
+  12000传炉 190毫升 底槽清 精工半手 张洪明
+  1200仿古 底槽清 120毫升 杨俊英
 
 Usage:
   python3 scripts/generate-shopify-products-csv.py "path/to/合集" > products.csv
@@ -53,6 +52,7 @@ FOLDER_RE = re.compile(
 AUTHOR_EN = {
     "张洪明": "Zhang Hongming",
     "郁佳骅": "Yu Jiahua",
+    "杨俊英": "Yang Junying",
 }
 
 POT_ROMAN = {
@@ -83,46 +83,82 @@ CRAFT_EN = {
     "半手": "Semi-handmade",
 }
 
+CRAFT_KEYWORDS = ("精工半手", "全手", "半手", "机车", "注浆")
+PRICE_NAME_RE = re.compile(r"^(\d+)(.+?)\s+(.+)$")
+
 
 def make_handle(price_cny: str, pot_name: str, clay: str, capacity: str, author: str) -> str:
     pot = POT_ROMAN.get(pot_name.strip(), "pot")
     clay_r = CLAY_ROMAN.get(clay, "clay")
     cap = capacity.replace("毫升", "ml")
-    author_r = "zhang-hongming" if author == "张洪明" else "yu-jiahua"
+    if author == "张洪明":
+        author_r = "zhang-hongming"
+    elif author == "杨俊英":
+        author_r = "yang-junying"
+    else:
+        author_r = "yu-jiahua"
     return f"{author_r}-{pot}-{clay_r}-{cap}-{price_cny}"
 
 
-def parse_folder(name: str) -> dict | None:
-    m = FOLDER_RE.match(name.strip())
+def _parse_folder_fields(name: str) -> tuple[str, str, str, str, str, str] | None:
+    """Parse folder name; supports clay/capacity order variants."""
+    m = PRICE_NAME_RE.match(name.strip())
     if not m:
         return None
-    price_cny, pot_name, clay, capacity, craft, author = m.groups()
+    price_cny, pot_name, rest = m.groups()
+    parts = rest.split()
+    if len(parts) < 2:
+        return None
+
+    author = parts[-1]
+    capacity = next((p for p in parts if "毫升" in p), None)
+    if not capacity:
+        return None
+
+    middle = [p for p in parts if p not in (author, capacity)]
+    craft = next((p for p in middle if any(k in p for k in CRAFT_KEYWORDS)), "")
+    if craft:
+        middle = [p for p in middle if p != craft]
+
+    clay = " ".join(middle) if middle else "紫砂"
+    return price_cny, pot_name.strip(), clay, capacity, craft, author
+
+
+def parse_folder(name: str) -> dict | None:
+    parsed = _parse_folder_fields(name)
+    if not parsed:
+        return None
+    price_cny, pot_name, clay, capacity, craft, author = parsed
     capacity_ml = capacity.replace("毫升", "ml")
     author_en = AUTHOR_EN.get(author, author)
-    craft_en = CRAFT_EN.get(craft, craft)
+    craft_en = CRAFT_EN.get(craft, craft) if craft else "Handcrafted"
     price_hkd = round(int(price_cny) * HKD_RATE)
 
-    title = (
-        f"{author_en} Yixing Teapot – {pot_name.strip()} – "
-        f"{clay} {capacity_ml}"
-    )
     if author == "张洪明":
         title = (
-            f"Zhang Hongming Handmade Yixing Teapot – {pot_name.strip()} – "
+            f"Zhang Hongming Handmade Yixing Teapot – {pot_name} – "
             f"{clay} {capacity_ml}"
         )
+    else:
+        title = f"{author_en} Yixing Teapot – {pot_name} – {clay} {capacity_ml}"
+
+    craft_line = (
+        f"<li><strong>Craft:</strong> {craft_en} ({craft})</li>\n"
+        if craft
+        else ""
+    )
+    craft_cn = f"，{craft}" if craft else ""
 
     body = f"""<p>Authentic Yixing zisha teapot from Yixing, China.</p>
 <ul>
-<li><strong>Style:</strong> {pot_name.strip()}</li>
+<li><strong>Style:</strong> {pot_name}</li>
 <li><strong>Clay:</strong> {clay}</li>
 <li><strong>Capacity:</strong> {capacity_ml}</li>
-<li><strong>Craft:</strong> {craft_en} ({craft})</li>
-<li><strong>Artisan:</strong> {author_en} ({author})</li>
+{craft_line}<li><strong>Artisan:</strong> {author_en} ({author})</li>
 <li><strong>Origin:</strong> Yixing, China</li>
 </ul>
 <p>Ships carefully packed from our Yixing warehouse to Hong Kong and worldwide.</p>
-<p>宜兴紫砂壶，{author}制作。{clay}，{capacity}，{craft}。宜兴发货。</p>"""
+<p>宜兴紫砂壶，{author}制作。{clay}，{capacity}{craft_cn}。宜兴发货。</p>"""
 
     handle_base = make_handle(price_cny, pot_name, clay, capacity, author)
     tags = f"zisha, yixing, teapot, handmade, {author_en}"
@@ -192,6 +228,9 @@ def main() -> None:
         row = parse_folder(folder)
         if not row:
             print(f"# skip (bad format): {folder}", file=sys.stderr)
+            continue
+        if "掇球" in folder and "张洪明" in folder:
+            print(f"# skip (already listed): {folder}", file=sys.stderr)
             continue
         if row["Handle"] in SKIP_HANDLES:
             print(f"# skip (already listed): {folder}", file=sys.stderr)
