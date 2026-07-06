@@ -8,7 +8,7 @@ Folder name examples:
   1200仿古 底槽清 120毫升 杨俊英
 
 Usage:
-  python3 scripts/generate-shopify-products-csv.py "path/to/合集" > products.csv
+  python3 scripts/generate-shopify-products-csv.py "path/to/合集" --out products.csv
   python3 scripts/generate-shopify-products-csv.py  # uses built-in sample list
 
 HKD price = CNY price * 1.1 (same as first listing: 7000 -> 7800, 800 -> 880)
@@ -16,6 +16,7 @@ HKD price = CNY price * 1.1 (same as first listing: 7000 -> 7800, 800 -> 880)
 
 from __future__ import annotations
 
+import argparse
 import csv
 import re
 import sys
@@ -142,23 +143,26 @@ def parse_folder(name: str) -> dict | None:
     else:
         title = f"{author_en} Yixing Teapot – {pot_name} – {clay} {capacity_ml}"
 
-    craft_line = (
-        f"<li><strong>Craft:</strong> {craft_en} ({craft})</li>\n"
+    craft_cn = f"，{craft}" if craft else ""
+    craft_line_html = (
+        f"<li><strong>Craft:</strong> {craft_en} ({craft})</li>"
         if craft
         else ""
     )
-    craft_cn = f"，{craft}" if craft else ""
-
-    body = f"""<p>Authentic Yixing zisha teapot from Yixing, China.</p>
-<ul>
-<li><strong>Style:</strong> {pot_name}</li>
-<li><strong>Clay:</strong> {clay}</li>
-<li><strong>Capacity:</strong> {capacity_ml}</li>
-{craft_line}<li><strong>Artisan:</strong> {author_en} ({author})</li>
-<li><strong>Origin:</strong> Yixing, China</li>
-</ul>
-<p>Ships carefully packed from our Yixing warehouse to Hong Kong and worldwide.</p>
-<p>宜兴紫砂壶，{author}制作。{clay}，{capacity}{craft_cn}。宜兴发货。</p>"""
+    # Single-line HTML so CSV rows are not split across lines (Shopify requires Title).
+    body = (
+        f"<p>Authentic Yixing zisha teapot from Yixing, China.</p>"
+        f"<ul>"
+        f"<li><strong>Style:</strong> {pot_name}</li>"
+        f"<li><strong>Clay:</strong> {clay}</li>"
+        f"<li><strong>Capacity:</strong> {capacity_ml}</li>"
+        f"{craft_line_html}"
+        f"<li><strong>Artisan:</strong> {author_en} ({author})</li>"
+        f"<li><strong>Origin:</strong> Yixing, China</li>"
+        f"</ul>"
+        f"<p>Ships carefully packed from our Yixing warehouse to Hong Kong and worldwide.</p>"
+        f"<p>宜兴紫砂壶，{author}制作。{clay}，{capacity}{craft_cn}。宜兴发货。</p>"
+    )
 
     handle_base = make_handle(price_cny, pot_name, clay, capacity, author)
     tags = f"zisha, yixing, teapot, handmade, {author_en}"
@@ -194,10 +198,7 @@ def collect_folders(path: Path | None) -> list[str]:
     return SAMPLE_FOLDERS
 
 
-def main() -> None:
-    root = Path(sys.argv[1]) if len(sys.argv) > 1 else None
-    folders = collect_folders(root)
-
+def write_csv(rows: list[dict], out: Path | None) -> None:
     fieldnames = [
         "Handle",
         "Title",
@@ -221,9 +222,26 @@ def main() -> None:
         "Status",
     ]
 
-    writer = csv.DictWriter(sys.stdout, fieldnames=fieldnames, extrasaction="ignore")
-    writer.writeheader()
+    if out:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        fh = out.open("w", encoding="utf-8", newline="")
+    else:
+        fh = sys.stdout
 
+    try:
+        writer = csv.DictWriter(fh, fieldnames=fieldnames, extrasaction="ignore")
+        writer.writeheader()
+        for row in rows:
+            if not row.get("Title", "").strip():
+                raise ValueError(f"Missing Title for handle: {row.get('Handle')}")
+            writer.writerow(row)
+    finally:
+        if out:
+            fh.close()
+
+
+def build_rows(folders: list[str]) -> list[dict]:
+    rows: list[dict] = []
     for folder in folders:
         row = parse_folder(folder)
         if not row:
@@ -235,7 +253,31 @@ def main() -> None:
         if row["Handle"] in SKIP_HANDLES:
             print(f"# skip (already listed): {folder}", file=sys.stderr)
             continue
-        writer.writerow(row)
+        rows.append(row)
+    return rows
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Generate Shopify product import CSV")
+    parser.add_argument(
+        "folder",
+        nargs="?",
+        help="Path to 合集 folder containing product subfolders",
+    )
+    parser.add_argument(
+        "--out",
+        "-o",
+        type=Path,
+        help="Write UTF-8 CSV to this file (recommended on Windows)",
+    )
+    args = parser.parse_args()
+
+    root = Path(args.folder) if args.folder else None
+    folders = collect_folders(root)
+    rows = build_rows(folders)
+    write_csv(rows, args.out)
+
+    print(f"# wrote {len(rows)} products", file=sys.stderr)
 
 
 if __name__ == "__main__":
