@@ -45,8 +45,8 @@ find_product = shopify_upload.find_product
 image_files = shopify_upload.image_files
 should_skip_folder = shopify_upload.should_skip_folder
 
-API_VERSION = shopify_upload.API_VERSION
-REQUEST_DELAY = shopify_upload.REQUEST_DELAY_SEC
+API_VERSION = getattr(shopify_upload, "API_VERSION", "2024-10")
+REQUEST_DELAY = getattr(shopify_upload, "REQUEST_DELAY_SEC", 0.55)
 
 
 def fetch_all_products(store: str, token: str) -> tuple[dict[str, dict], dict[str, dict], list[dict]]:

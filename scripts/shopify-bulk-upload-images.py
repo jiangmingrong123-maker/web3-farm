@@ -58,6 +58,7 @@ MISSING_FOUR_FOLDERS = (
     "19800雪华壶 天青泥 290毫升 全手 张洪明",
     "19800雪华壶 老青段 290毫升 全手 张洪明",
 )
+API_VERSION = "2024-10"
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 REQUEST_DELAY_SEC = 0.55
 
