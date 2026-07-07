@@ -98,11 +98,17 @@ def capacity_from_row(row: dict) -> str:
     return m.group(1) if m else ""
 
 
+def clay_capacity_from_row(row: dict) -> str:
+    parts = [p.strip() for p in row["Title"].split("–")]
+    return parts[2] if len(parts) >= 3 else ""
+
+
 def find_best(
     products: list[dict], row: dict, claimed: set[str]
 ) -> dict | None:
     pot = pot_name_from_row(row)
     cap = capacity_from_row(row)
+    clay_cap = clay_capacity_from_row(row)
     vendor = row["Vendor"]
     price = row["Variant Price"]
     want_title = normalize_title(row["Title"])
@@ -117,18 +123,18 @@ def find_best(
     for p in products:
         if p["id"] in claimed:
             continue
-        score = 0
         if p["vendor"] != vendor:
             continue
         if not price_equal(p["price"], price):
             continue
-        score += 10
+        if clay_cap and clay_cap not in p["title"]:
+            continue
+        score = 10
         if pot and pot in p["title"]:
             score += 5
         if cap and cap in p["title"]:
             score += 3
-        if score >= 15:
-            scored.append((score, p))
+        scored.append((score, p))
 
     if not scored:
         return None
@@ -222,7 +228,8 @@ def main() -> None:
             print(f"[dry-run] {action}: {name}")
             print(f"          -> {row['Title']}")
             if match:
-                print(f"          match: {match['handle']} ({match['title'][:50]})")
+                print(f"          match: {match['handle']} ({match['title'][:60]})")
+                claimed.add(match["id"])
             n += 1
             continue
 
