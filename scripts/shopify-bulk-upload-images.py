@@ -5,14 +5,19 @@ Attach local images to existing Shopify products (matched by handle).
 Use this after CSV import. Each subfolder in 合集 is parsed to a product
 handle (same logic as generate-shopify-products-csv.py).
 
-Prereqs (one-time):
-  Shopify Admin → Settings → Apps → Develop apps → Create app
-  Admin API scopes: read_products, write_products
-  Install app → copy Admin API access token (shpat_...)
+Prereqs (one-time, 2026 Dev Dashboard flow):
+  Store admin → Settings → Apps → App development
+  → Build an app in the development control panel
+  Create app → set scopes read_products, write_products → install on store
+  Copy Client ID and Client secret from app Settings
 
-Env:
-  SHOPIFY_STORE=zhang-hongming-zisha-studio
+Env (pick one):
+  # Legacy custom app (if you still have shpat_ token):
   SHOPIFY_ADMIN_TOKEN=shpat_...
+
+  # Dev Dashboard app (2026+):
+  SHOPIFY_CLIENT_ID=...
+  SHOPIFY_CLIENT_SECRET=...
 
 Usage:
   python scripts/shopify-bulk-upload-images.py "path/to/合集" --dry-run
@@ -34,6 +39,8 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+
+from shopify_auth import get_access_token
 
 _gen_path = Path(__file__).resolve().parent / "generate-shopify-products-csv.py"
 _spec = importlib.util.spec_from_file_location("shopify_gen", _gen_path)
@@ -166,10 +173,13 @@ def main() -> None:
         sys.exit(1)
 
     store = os.environ.get("SHOPIFY_STORE", "zhang-hongming-zisha-studio")
-    token = os.environ.get("SHOPIFY_ADMIN_TOKEN", "")
-    if not token and not args.dry_run:
-        print("Set SHOPIFY_ADMIN_TOKEN env var (or use --dry-run).", file=sys.stderr)
-        sys.exit(1)
+    token = ""
+    if not args.dry_run:
+        try:
+            token = get_access_token(store)
+        except RuntimeError as exc:
+            print(str(exc), file=sys.stderr)
+            sys.exit(1)
 
     print(f"Store: {store}.myshopify.com")
     products = fetch_products_index(store, token) if not args.dry_run else {}
