@@ -54,6 +54,7 @@ AUTHOR_EN = {
     "张洪明": "Zhang Hongming",
     "郁佳骅": "Yu Jiahua",
     "杨俊英": "Yang Junying",
+    "张赵阳": "Zhang Zhaoyang",
 }
 
 POT_ROMAN = {
@@ -112,6 +113,8 @@ def make_handle(price_cny: str, pot_name: str, clay: str, capacity: str, author:
         author_r = "zhang-hongming"
     elif author == "杨俊英":
         author_r = "yang-junying"
+    elif author == "张赵阳":
+        author_r = "zhang-zhaoyang"
     else:
         author_r = "yu-jiahua"
     return f"{author_r}-{pot}-{clay_r}-{cap}-{price_cny}"
@@ -154,10 +157,13 @@ def parse_folder(name: str) -> dict | None:
     if author == "张洪明":
         title = (
             f"Zhang Hongming Handmade Yixing Teapot – {pot_name} – "
-            f"{clay} {capacity_ml}"
+            f"{clay} {capacity_ml} – CNY {price_cny}"
         )
     else:
-        title = f"{author_en} Yixing Teapot – {pot_name} – {clay} {capacity_ml}"
+        title = (
+            f"{author_en} Yixing Teapot – {pot_name} – "
+            f"{clay} {capacity_ml} – CNY {price_cny}"
+        )
 
     craft_cn = f"，{craft}" if craft else ""
     craft_line_html = (
