@@ -25,6 +25,7 @@ Usage:
   python scripts/shopify-bulk-upload-images.py "path/to/合集" --limit 5
   python scripts/shopify-bulk-upload-images.py "path/to/合集" --force
   python scripts/shopify-bulk-upload-images.py "path/to/合集" --only "莲子" "雪华壶"
+  python scripts/shopify-bulk-upload-images.py "path/to/合集" --missing-four --create-if-missing
 """
 
 from __future__ import annotations
@@ -51,7 +52,12 @@ _spec.loader.exec_module(shopify_gen)
 parse_folder = shopify_gen.parse_folder
 SKIP_HANDLES = shopify_gen.SKIP_HANDLES
 
-API_VERSION = "2024-10"
+MISSING_FOUR_FOLDERS = (
+    "1200莲子 老紫泥 230毫升 杨俊英",
+    "1200莲子 降坡泥 230毫升 精工半手 杨俊英",
+    "19800雪华壶 天青泥 290毫升 全手 张洪明",
+    "19800雪华壶 老青段 290毫升 全手 张洪明",
+)
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 REQUEST_DELAY_SEC = 0.55
 
@@ -139,6 +145,40 @@ def find_product(
     return None, ""
 
 
+def create_shopify_product(store: str, token: str, row: dict) -> dict:
+    payload = {
+        "product": {
+            "title": row["Title"],
+            "body_html": row["Body (HTML)"],
+            "vendor": row["Vendor"],
+            "product_type": row["Type"],
+            "tags": row["Tags"],
+            "status": "active",
+            "handle": row["Handle"],
+            "variants": [
+                {
+                    "price": row["Variant Price"],
+                    "grams": int(row["Variant Grams"]),
+                    "inventory_management": "shopify",
+                    "inventory_policy": "deny",
+                    "requires_shipping": True,
+                    "taxable": True,
+                }
+            ],
+        }
+    }
+    body, _ = api_request(store, token, "POST", "/products.json", payload)
+    product = body.get("product")
+    if not product:
+        raise RuntimeError(f"create product failed: {body}")
+    return {
+        "id": str(product["id"]),
+        "handle": product["handle"],
+        "title": product.get("title", row["Title"]),
+        "image_count": 0,
+    }
+
+
 def upload_image(
     store: str, token: str, product_id: str, image_path: Path, position: int
 ) -> None:
@@ -199,7 +239,26 @@ def main() -> None:
         metavar="KEYWORD",
         help="Only folders whose name contains any keyword (e.g. 莲子 雪华壶)",
     )
+    parser.add_argument(
+        "--folders",
+        nargs="*",
+        metavar="NAME",
+        help="Only these exact folder names",
+    )
+    parser.add_argument(
+        "--missing-four",
+        action="store_true",
+        help="Process the 4 folders that failed CSV import (莲子 x2, 雪华壶 x2)",
+    )
+    parser.add_argument(
+        "--create-if-missing",
+        action="store_true",
+        help="Create Shopify product when not found, then upload images",
+    )
     args = parser.parse_args()
+
+    if args.missing_four:
+        args.folders = list(MISSING_FOUR_FOLDERS)
 
     if not args.root.is_dir():
         print(f"Not a directory: {args.root}", file=sys.stderr)
@@ -228,6 +287,7 @@ def main() -> None:
         "skipped_no_images": 0,
         "skipped_listed": 0,
         "skipped_bad_name": 0,
+        "created": 0,
         "not_found": 0,
         "errors": 0,
     }
@@ -239,6 +299,8 @@ def main() -> None:
             break
 
         name = folder.name
+        if args.folders and name not in args.folders:
+            continue
         if args.only and not any(k in name for k in args.only):
             continue
         if should_skip_folder(name):
@@ -260,11 +322,33 @@ def main() -> None:
             continue
 
         if args.dry_run:
-            print(f"[dry-run] {name} -> {handle} | {row['Title']} ({len(imgs)} images)")
+            note = " (would create)" if args.create_if_missing else ""
+            print(
+                f"[dry-run] {name} -> {handle} | {row['Title']}{note} "
+                f"({len(imgs)} images)"
+            )
             processed += 1
             continue
 
         product, matched_via = find_product(by_handle, by_title, handle, row["Title"])
+        if not product and args.create_if_missing:
+            try:
+                print(f"creating product: {row['Title']}")
+                product = create_shopify_product(store, token, row)
+                by_handle[product["handle"]] = product
+                by_title[normalize_title(product["title"])] = product
+                stats["created"] += 1
+                matched_via = "created"
+            except (urllib.error.HTTPError, RuntimeError) as exc:
+                detail = (
+                    exc.read().decode()
+                    if isinstance(exc, urllib.error.HTTPError)
+                    else str(exc)
+                )
+                print(f"  CREATE ERROR: {detail}", file=sys.stderr)
+                stats["errors"] += 1
+                continue
+
         if not product:
             print(
                 f"NOT FOUND in Shopify: {handle} | {row['Title']}  ({name})",
