@@ -81,6 +81,13 @@ def fetch_all_products(store: str, token: str) -> tuple[dict[str, dict], dict[st
     return by_handle, by_title, all_products
 
 
+def price_equal(shopify_price: str, expected: str) -> bool:
+    try:
+        return float(shopify_price) == float(expected)
+    except (TypeError, ValueError):
+        return str(shopify_price) == str(expected)
+
+
 def audit(root: Path, store: str, token: str) -> list[dict]:
     by_handle, by_title, shopify_products = fetch_all_products(store, token)
     rows: list[dict] = []
