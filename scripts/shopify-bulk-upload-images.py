@@ -24,6 +24,7 @@ Usage:
   python scripts/shopify-bulk-upload-images.py "path/to/合集"
   python scripts/shopify-bulk-upload-images.py "path/to/合集" --limit 5
   python scripts/shopify-bulk-upload-images.py "path/to/合集" --force
+  python scripts/shopify-bulk-upload-images.py "path/to/合集" --only "莲子" "雪华壶"
 """
 
 from __future__ import annotations
@@ -90,18 +91,25 @@ def parse_next_link(link_header: str) -> str | None:
     return None
 
 
-def fetch_products_index(store: str, token: str) -> dict[str, dict]:
-    """handle -> {id, image_count}"""
-    index: dict[str, dict] = {}
-    path = "/products.json?limit=250&fields=id,handle,images"
+def fetch_products_index(store: str, token: str) -> tuple[dict[str, dict], dict[str, dict]]:
+    """handle -> product, normalized_title -> product"""
+    by_handle: dict[str, dict] = {}
+    by_title: dict[str, dict] = {}
+    path = "/products.json?limit=250&fields=id,handle,title,images"
     while path:
         body, headers = api_request(store, token, "GET", path)
         for product in body.get("products", []):
             images = product.get("images") or []
-            index[product["handle"]] = {
+            entry = {
                 "id": str(product["id"]),
+                "handle": product["handle"],
+                "title": product.get("title", ""),
                 "image_count": len(images),
             }
+            by_handle[product["handle"]] = entry
+            title_key = normalize_title(entry["title"])
+            if title_key:
+                by_title[title_key] = entry
         next_url = parse_next_link(headers.get("Link", ""))
         if next_url:
             prefix = f"https://{store}.myshopify.com/admin/api/{API_VERSION}"
@@ -109,7 +117,26 @@ def fetch_products_index(store: str, token: str) -> dict[str, dict]:
         else:
             path = ""
         time.sleep(REQUEST_DELAY_SEC)
-    return index
+    return by_handle, by_title
+
+
+def normalize_title(title: str) -> str:
+    return re.sub(r"\s+", " ", title.strip().lower())
+
+
+def find_product(
+    by_handle: dict[str, dict],
+    by_title: dict[str, dict],
+    handle: str,
+    title: str,
+) -> tuple[dict | None, str]:
+    product = by_handle.get(handle)
+    if product:
+        return product, "handle"
+    product = by_title.get(normalize_title(title))
+    if product:
+        return product, f"title:{product['handle']}"
+    return None, ""
 
 
 def upload_image(
@@ -166,6 +193,12 @@ def main() -> None:
         action="store_true",
         help="Upload even if product already has images",
     )
+    parser.add_argument(
+        "--only",
+        nargs="*",
+        metavar="KEYWORD",
+        help="Only folders whose name contains any keyword (e.g. 莲子 雪华壶)",
+    )
     args = parser.parse_args()
 
     if not args.root.is_dir():
@@ -182,9 +215,11 @@ def main() -> None:
             sys.exit(1)
 
     print(f"Store: {store}.myshopify.com")
-    products = fetch_products_index(store, token) if not args.dry_run else {}
+    by_handle: dict[str, dict] = {}
+    by_title: dict[str, dict] = {}
     if not args.dry_run:
-        print(f"Loaded {len(products)} products from Shopify")
+        by_handle, by_title = fetch_products_index(store, token)
+        print(f"Loaded {len(by_handle)} products from Shopify")
 
     folders = sorted(p for p in args.root.iterdir() if p.is_dir())
     stats = {
@@ -204,6 +239,8 @@ def main() -> None:
             break
 
         name = folder.name
+        if args.only and not any(k in name for k in args.only):
+            continue
         if should_skip_folder(name):
             print(f"skip (manual listing): {name}")
             stats["skipped_listed"] += 1
@@ -223,25 +260,31 @@ def main() -> None:
             continue
 
         if args.dry_run:
-            print(f"[dry-run] {name} -> {handle} ({len(imgs)} images)")
+            print(f"[dry-run] {name} -> {handle} | {row['Title']} ({len(imgs)} images)")
             processed += 1
             continue
 
-        product = products.get(handle)
+        product, matched_via = find_product(by_handle, by_title, handle, row["Title"])
         if not product:
-            print(f"NOT FOUND in Shopify: {handle}  ({name})", file=sys.stderr)
-            not_found.append(f"{name} -> {handle}")
+            print(
+                f"NOT FOUND in Shopify: {handle} | {row['Title']}  ({name})",
+                file=sys.stderr,
+            )
+            not_found.append(f"{name} -> {handle} | {row['Title']}")
             stats["not_found"] += 1
             continue
 
+        if matched_via != "handle":
+            print(f"matched by {matched_via} for {name}")
+
         if product["image_count"] > 0 and not args.force:
-            print(f"skip (already has images): {handle}")
+            print(f"skip (already has images): {product['handle']}")
             stats["skipped_has_images"] += 1
             continue
 
         product_id = product["id"]
         start_pos = product["image_count"] + 1
-        print(f"uploading {name} -> {handle} ({len(imgs)} images)")
+        print(f"uploading {name} -> {product['handle']} ({len(imgs)} images)")
         try:
             for i, img in enumerate(imgs):
                 upload_image(store, token, product_id, img, start_pos + i)

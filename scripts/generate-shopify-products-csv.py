@@ -69,6 +69,11 @@ POT_ROMAN = {
     "周盘": "zhoupan",
     "掇球": "duoqiu",
     "仿古": "fanggu",
+    "莲子": "lianzi",
+    "雪华壶": "xuehua",
+    "秦权": "qinquan",
+    "笑樱": "xiaoying",
+    "传炉": "chuanlu",
 }
 
 CLAY_ROMAN = {
@@ -88,9 +93,20 @@ CRAFT_KEYWORDS = ("精工半手", "全手", "半手", "机车", "注浆")
 PRICE_NAME_RE = re.compile(r"^(\d+)(.+?)\s+(.+)$")
 
 
+def slugify_part(text: str) -> str:
+    """ASCII slug or short hash for unknown Chinese labels (unique handles)."""
+    import hashlib
+
+    text = text.strip()
+    ascii_slug = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+    if ascii_slug:
+        return ascii_slug[:24]
+    return "cn" + hashlib.md5(text.encode()).hexdigest()[:8]
+
+
 def make_handle(price_cny: str, pot_name: str, clay: str, capacity: str, author: str) -> str:
-    pot = POT_ROMAN.get(pot_name.strip(), "pot")
-    clay_r = CLAY_ROMAN.get(clay, "clay")
+    pot = POT_ROMAN.get(pot_name.strip()) or slugify_part(pot_name)
+    clay_r = CLAY_ROMAN.get(clay) or slugify_part(clay)
     cap = capacity.replace("毫升", "ml")
     if author == "张洪明":
         author_r = "zhang-hongming"
