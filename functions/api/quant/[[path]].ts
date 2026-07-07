@@ -29,7 +29,6 @@ import {
   ensureSimUnlocked,
   loadQuantBilling,
   quantPricingPublic,
-  QUANT_CLOUD_HOURLY_POINTS,
   saveQuantBilling,
 } from "../../lib/quant/billing";
 import { loadFarmPoints } from "../../lib/farm-points";
@@ -161,20 +160,6 @@ export async function onRequest(context: {
     if (!unlocked.ok) {
       return json(
         { ok: false, error: unlocked.error, need: unlocked.need, have: unlocked.have },
-        400,
-      );
-    }
-
-    const farmPoints = unlocked.farmPoints;
-    if (farmPoints < QUANT_CLOUD_HOURLY_POINTS) {
-      return json(
-        {
-          ok: false,
-          error: "INSUFFICIENT_POINTS",
-          need: QUANT_CLOUD_HOURLY_POINTS,
-          have: farmPoints,
-          reason: "cloud_hourly",
-        },
         400,
       );
     }

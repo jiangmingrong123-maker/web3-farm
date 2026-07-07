@@ -45,6 +45,7 @@ import {
   type PaperState,
 } from "@/lib/quant/paper-store";
 import { useFarmSign } from "@/lib/web3/use-farm-sign";
+import { isMobileBrowser } from "@/lib/web3/connect-wallet";
 
 type Props = {
   locale: string;
@@ -127,28 +128,36 @@ export function QuantQuickPanel({
   const simUnlockCost = pricing?.simUnlock ?? QUANT_SIM_UNLOCK_POINTS;
   const cloudHourlyCost = pricing?.cloudHourly ?? QUANT_CLOUD_HOURLY_POINTS;
   const cloudDailyCost = pricing?.cloudDaily ?? QUANT_CLOUD_DAILY_POINTS;
+  const isMobile = typeof window !== "undefined" && isMobileBrowser();
+
+  const formatQuantError = useCallback(
+    (code: string, need?: number, have?: number) => {
+      if (code === "INSUFFICIENT_POINTS") {
+        return t("billingInsufficient", {
+          need: need ?? simUnlockCost,
+          have: have ?? farmPoints,
+        });
+      }
+      if (code === "SIGN_REJECTED") return t("signRejected");
+      if (code === "WRONG_NETWORK") return t("wrongNetworkQuant");
+      if (code === "NOT_CONNECTED" || code === "NO_SIGNER") return t("cloudNeedWallet");
+      return t("cloudActionFailed");
+    },
+    [t, simUnlockCost, farmPoints],
+  );
 
   const ensureSimUnlocked = useCallback(async (): Promise<boolean> => {
     if (!address) return false;
     if (billing?.simUnlocked) return true;
     const res = await unlockSimQuantApi(address, farmSign);
     if (!res.ok) {
-      if (res.error === "INSUFFICIENT_POINTS") {
-        setError(
-          t("billingInsufficient", {
-            need: res.need ?? simUnlockCost,
-            have: res.have ?? farmPoints,
-          }),
-        );
-      } else {
-        setError(t("cloudActionFailed"));
-      }
+      setError(formatQuantError(res.error, res.need, res.have));
       return false;
     }
     setBilling(res.billing);
     setFarmPoints(res.farmPoints);
     return true;
-  }, [address, billing?.simUnlocked, farmSign, farmPoints, simUnlockCost, t]);
+  }, [address, billing?.simUnlocked, farmSign, formatQuantError]);
 
   useEffect(() => {
     void refreshCloud();
@@ -268,16 +277,7 @@ export function QuantQuickPanel({
         farmSign,
       );
       if (!res.ok) {
-        if (res.error === "INSUFFICIENT_POINTS") {
-          setError(
-            t("billingInsufficient", {
-              need: res.need ?? simUnlockCost,
-              have: res.have ?? farmPoints,
-            }),
-          );
-        } else {
-          setError(t("cloudActionFailed"));
-        }
+        setError(formatQuantError(res.error, res.need, res.have));
         return;
       }
       setCloudState(res.state);
@@ -287,11 +287,14 @@ export function QuantQuickPanel({
       if (res.state.lastPrice != null) setPrice(res.state.lastPrice);
       if (res.state.lastSignal) setSignal(res.state.lastSignal);
     } catch (e) {
-      setError(e instanceof Error ? e.message : t("cloudActionFailed"));
+      const msg = e instanceof Error ? e.message : "";
+      if (msg === "WRONG_NETWORK") setError(t("wrongNetworkQuant"));
+      else if (msg === "NOT_CONNECTED" || msg === "NO_SIGNER") setError(t("cloudNeedWallet"));
+      else setError(t("cloudActionFailed"));
     } finally {
       setLoading(false);
     }
-  }, [address, isConnected, cloudKv, poolId, strategyId, params, farmSign, t, onCloudSync, simUnlockCost, farmPoints]);
+  }, [address, isConnected, cloudKv, poolId, strategyId, params, farmSign, t, onCloudSync, formatQuantError]);
 
   const stopCloud = useCallback(async () => {
     if (!address) return;
@@ -444,6 +447,7 @@ export function QuantQuickPanel({
         </p>
         <p className="mt-1">{t("billingSimUnlock", { points: simUnlockCost })}</p>
         <p className="mt-0.5">{t("billingCloudHourly", { hourly: cloudHourlyCost, daily: cloudDailyCost })}</p>
+        <p className="mt-0.5 text-white/35">{t("billingCloudHourlyLater")}</p>
         <p className="mt-0.5 text-white/40">{t("billingLocalFree")}</p>
         {!QUANT_LIVE_ENABLED && (
           <p className="mt-1 border-t border-white/10 pt-1 text-white/35">
@@ -475,6 +479,12 @@ export function QuantQuickPanel({
           </p>
           <p className="mt-1 text-[10px] text-white/40">{t("cloudUiNote")}</p>
         </div>
+      )}
+
+      {paperMode === "cloud" && isMobile && !isConnected && (
+        <p className="rounded-lg border border-amber-500/30 bg-amber-950/25 px-3 py-2 text-[11px] leading-relaxed text-amber-200/85">
+          {t("cloudMobileHint")}
+        </p>
       )}
 
       {paperMode === "cloud" && !isConnected && (

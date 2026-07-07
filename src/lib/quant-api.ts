@@ -31,6 +31,24 @@ export type QuantApiError = {
   reason?: string;
 };
 
+function isSignRejected(err: unknown): boolean {
+  const msg =
+    err instanceof Error ? err.message
+    : typeof err === "object" && err && "shortMessage" in err
+      ? String((err as { shortMessage?: string }).shortMessage)
+      : String(err);
+  return /reject|denied|cancel|declined|user refused|用户拒绝|取消|拒签|拒绝/i.test(msg);
+}
+
+function mapSignError(err: unknown): QuantApiError {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (msg === "NOT_CONNECTED") return { ok: false, error: "NOT_CONNECTED" };
+  if (msg === "WRONG_NETWORK") return { ok: false, error: "WRONG_NETWORK" };
+  if (msg === "NO_SIGNER") return { ok: false, error: "NO_SIGNER" };
+  if (isSignRejected(err)) return { ok: false, error: "SIGN_REJECTED" };
+  return { ok: false, error: "NETWORK" };
+}
+
 async function signedPost<T>(
   wallet: string,
   subpath: string,
@@ -51,8 +69,8 @@ async function signedPost<T>(
     const json = (await res.json()) as T & QuantApiError;
     if (!res.ok) return json;
     return json;
-  } catch {
-    return { ok: false, error: "NETWORK" };
+  } catch (e) {
+    return mapSignError(e);
   }
 }
 

@@ -7,6 +7,7 @@ import { mainnet } from "wagmi/chains";
 import {
   connectorLabel,
   hasInjectedProvider,
+  isMobileBrowser,
   listConnectOptions,
   metamaskDappUrl,
   okxDappUrl,
@@ -27,26 +28,40 @@ export function WalletButton() {
   const options = useMemo(() => listConnectOptions(connectors), [connectors]);
   const primary = useMemo(() => pickConnectConnector(connectors), [connectors]);
   const pageUrl = typeof window !== "undefined" ? window.location.href : SITE_FALLBACK;
-  const needsWalletApp =
-    !primary && typeof window !== "undefined" && !hasWalletConnect && !hasInjectedProvider();
+  const isMobile = typeof window !== "undefined" && isMobileBrowser();
+  const inWalletBrowser = typeof window !== "undefined" && hasInjectedProvider();
+  const showMobileDappLinks = isMobile && !inWalletBrowser;
 
   if (!isConnected) {
     return (
-      <div className="relative">
-        {needsWalletApp ?
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            <a
-              href={okxDappUrl(pageUrl)}
-              className="rounded-full border border-white/20 px-4 py-2 text-xs font-semibold text-white/90 hover:border-white/35"
-            >
-              {t("openInOkx")}
-            </a>
-            <a
-              href={metamaskDappUrl(pageUrl)}
-              className="rounded-full bg-gold px-4 py-2 text-xs font-bold text-ink hover:brightness-110"
-            >
-              {t("openInMetaMask")}
-            </a>
+      <div className="relative max-w-[min(100%,280px)]">
+        {showMobileDappLinks ?
+          <div className="flex flex-col items-end gap-2">
+            <p className="text-right text-[10px] leading-snug text-white/45">{t("mobileWalletHint")}</p>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <a
+                href={okxDappUrl(pageUrl)}
+                className="rounded-full border border-white/20 px-3 py-2 text-xs font-semibold text-white/90 hover:border-white/35"
+              >
+                {t("openInOkx")}
+              </a>
+              <a
+                href={metamaskDappUrl(pageUrl)}
+                className="rounded-full bg-gold px-3 py-2 text-xs font-bold text-ink hover:brightness-110"
+              >
+                {t("openInMetaMask")}
+              </a>
+            </div>
+            {hasWalletConnect && options.length > 0 && (
+              <button
+                type="button"
+                disabled={isPending}
+                onClick={() => setShowChoices((v) => !v)}
+                className="rounded-full border border-white/15 px-4 py-2 text-xs text-white/75"
+              >
+                {t("connectWalletConnect")}
+              </button>
+            )}
           </div>
         : (
           <button
@@ -54,7 +69,7 @@ export function WalletButton() {
             disabled={!primary || isPending}
             onClick={() => {
               if (!primary) return;
-              if (options.length > 1) {
+              if (isMobile || options.length > 1) {
                 setShowChoices((v) => !v);
                 return;
               }
@@ -67,7 +82,7 @@ export function WalletButton() {
           </button>
         )}
 
-        {showChoices && options.length > 1 && (
+        {showChoices && options.length > 0 && (
           <div className="absolute right-0 top-full z-50 mt-2 min-w-[200px] rounded-xl border border-white/10 bg-ink p-2 shadow-xl">
             {options.map((connector) => (
               <button

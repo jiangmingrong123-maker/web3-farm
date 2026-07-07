@@ -28,6 +28,7 @@
     "openInMetaMask": "在 MetaMask 中打开",
     "openInOkx": "在 OKX 中打开",
     "connectWalletConnect": "WalletConnect",
+    "mobileWalletHint": "手机请用 OKX / MetaMask 内置浏览器打开本页，再连接钱包",
     "connectFailed": "连接失败，请重试"
   },
   "home": {
@@ -518,6 +519,10 @@
     "billingCloudHourly": "云端运行：{hourly} 积分/小时（约 {daily} 积分/天）",
     "billingLocalFree": "本机模拟：保持页面打开，不按小时扣积分",
     "billingInsufficient": "积分不足：需要 {need}，当前 {have}（可到展馆产分）",
+    "billingCloudHourlyLater": "云端每小时扣 2 积分；首小时开跑时不扣，请保证后续有足够积分",
+    "signRejected": "已取消签名，请在钱包中点「确认」",
+    "wrongNetworkQuant": "请把钱包切换到以太坊主网后再试",
+    "cloudMobileHint": "手机端：请先在右上角用 OKX / MetaMask 内置浏览器打开并连接钱包；开始云端后可在钱包里切走，服务器会继续跑",
     "billingSimLocked": "未开通模拟",
     "billingSimUnlocked": "已开通模拟",
     "livePricingPlan": "实盘方案（暂未开放）：开通 {unlock} 积分 · 约 {daily} 积分/天",

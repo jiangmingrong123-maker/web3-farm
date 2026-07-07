@@ -28,6 +28,7 @@
     "openInMetaMask": "Open in MetaMask",
     "openInOkx": "Open in OKX",
     "connectWalletConnect": "WalletConnect",
+    "mobileWalletHint": "On mobile, open this page in OKX or MetaMask in-app browser, then connect",
     "connectFailed": "Connection failed — try again"
   },
   "home": {
@@ -518,6 +519,10 @@
     "billingCloudHourly": "Cloud running: {hourly} pts/hour (~{daily} pts/day)",
     "billingLocalFree": "Local paper: keep tab open; no hourly charge",
     "billingInsufficient": "Insufficient points: need {need}, have {have} (earn in Hall)",
+    "billingCloudHourlyLater": "Cloud costs 2 pts/hour; first hour is free at start — keep points for later",
+    "signRejected": "Signature cancelled — please confirm in your wallet",
+    "wrongNetworkQuant": "Switch wallet to Ethereum mainnet and try again",
+    "cloudMobileHint": "On mobile: open this page in OKX or MetaMask in-app browser and connect wallet. After cloud starts, you can leave — server keeps running",
     "billingSimLocked": "Sim not unlocked",
     "billingSimUnlocked": "Sim unlocked",
     "livePricingPlan": "Live plan (not open yet): {unlock} pts unlock · ~{daily} pts/day",
