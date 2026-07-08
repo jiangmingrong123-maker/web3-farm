@@ -25,7 +25,7 @@ import sys
 import urllib.parse
 import urllib.request
 
-SCOPES = "read_products,write_products"
+SCOPES = "read_products,write_products,read_inventory,write_inventory"
 REDIRECT_URI = "http://localhost"
 
 
