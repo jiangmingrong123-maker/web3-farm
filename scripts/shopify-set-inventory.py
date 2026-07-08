@@ -10,7 +10,8 @@ Usage:
   python scripts/shopify-set-inventory.py --quantity 1 --limit 5
 
 Env: SHOPIFY_STORE, SHOPIFY_ADMIN_TOKEN (or CLIENT_ID + CLIENT_SECRET)
-App scopes: read_products, write_products, read_inventory, write_inventory
+Optional: SHOPIFY_LOCATION_ID (if read_locations scope is missing)
+App scopes: read_products, write_products, read_inventory, write_inventory, read_locations
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ import importlib.util
 import os
 import sys
 import time
+import urllib.error
 from pathlib import Path
 
 from shopify_auth import get_access_token
@@ -44,6 +46,38 @@ def fetch_primary_location(store: str, token: str) -> dict:
     active = [loc for loc in locations if loc.get("active")]
     loc = active[0] if active else locations[0]
     return {"id": str(loc["id"]), "name": loc.get("name", "")}
+
+
+def resolve_location(store: str, token: str, variants: list[dict]) -> dict:
+    override = os.environ.get("SHOPIFY_LOCATION_ID", "").strip()
+    if override:
+        return {"id": override, "name": "(SHOPIFY_LOCATION_ID)"}
+
+    try:
+        return fetch_primary_location(store, token)
+    except urllib.error.HTTPError as exc:
+        if exc.code != 403:
+            raise
+
+    for v in variants[:20]:
+        item_id = v["inventory_item_id"]
+        body, _ = api_request(
+            store,
+            token,
+            "GET",
+            f"/inventory_levels.json?inventory_item_ids={item_id}",
+        )
+        levels = body.get("inventory_levels") or []
+        if levels:
+            loc_id = str(levels[0]["location_id"])
+            return {"id": loc_id, "name": "(from inventory_levels)"}
+
+    raise RuntimeError(
+        "403 Forbidden on /locations.json — missing read_locations scope.\n"
+        "Fix A: In Dev Dashboard add read_locations to scopes, publish, reinstall app.\n"
+        "Fix B: Set SHOPIFY_LOCATION_ID from Shopify admin → "
+        "Settings → Locations (number in the page URL)."
+    )
 
 
 def fetch_variants(store: str, token: str) -> list[dict]:
@@ -141,10 +175,11 @@ def main() -> int:
     store = os.environ.get("SHOPIFY_STORE", "zhang-hongming-zisha-studio").strip()
     token = get_access_token(store)
 
-    location = fetch_primary_location(store, token)
     variants = fetch_variants(store, token)
     if args.limit:
         variants = variants[: args.limit]
+
+    location = resolve_location(store, token, variants)
 
     print(f"Store: {store}")
     print(f"Location: {location['name']} ({location['id']})")
