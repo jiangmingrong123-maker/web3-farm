@@ -38,6 +38,23 @@ API_VERSION = shopify_up.API_VERSION
 DELAY = shopify_up.REQUEST_DELAY_SEC
 
 
+def graphql_request(store: str, token: str, query: str) -> dict:
+    body, _ = api_request(
+        store,
+        token,
+        "POST",
+        "/graphql.json",
+        {"query": query},
+    )
+    if body.get("errors"):
+        raise RuntimeError(f"GraphQL errors: {body['errors']}")
+    return body.get("data") or {}
+
+
+def gid_to_id(gid: str) -> str:
+    return gid.rsplit("/", 1)[-1]
+
+
 def fetch_primary_location(store: str, token: str) -> dict:
     body, _ = api_request(store, token, "GET", "/locations.json")
     locations = body.get("locations") or []
@@ -46,6 +63,15 @@ def fetch_primary_location(store: str, token: str) -> dict:
     active = [loc for loc in locations if loc.get("active")]
     loc = active[0] if active else locations[0]
     return {"id": str(loc["id"]), "name": loc.get("name", "")}
+
+
+def fetch_location_graphql(store: str, token: str) -> dict:
+    data = graphql_request(store, token, "{ location { id name } }")
+    loc = data.get("location") or {}
+    gid = loc.get("id", "")
+    if not gid:
+        raise RuntimeError("GraphQL location query returned no location.")
+    return {"id": gid_to_id(gid), "name": loc.get("name", "")}
 
 
 def resolve_location(store: str, token: str, variants: list[dict]) -> dict:
@@ -59,24 +85,36 @@ def resolve_location(store: str, token: str, variants: list[dict]) -> dict:
         if exc.code != 403:
             raise
 
+    try:
+        return fetch_location_graphql(store, token)
+    except (urllib.error.HTTPError, RuntimeError):
+        pass
+
     for v in variants[:20]:
         item_id = v["inventory_item_id"]
-        body, _ = api_request(
-            store,
-            token,
-            "GET",
-            f"/inventory_levels.json?inventory_item_ids={item_id}",
-        )
+        try:
+            body, _ = api_request(
+                store,
+                token,
+                "GET",
+                f"/inventory_levels.json?inventory_item_ids={item_id}",
+            )
+        except urllib.error.HTTPError as exc:
+            if exc.code == 403:
+                continue
+            raise
         levels = body.get("inventory_levels") or []
         if levels:
             loc_id = str(levels[0]["location_id"])
             return {"id": loc_id, "name": "(from inventory_levels)"}
 
     raise RuntimeError(
-        "403 Forbidden on /locations.json — missing read_locations scope.\n"
-        "Fix A: In Dev Dashboard add read_locations to scopes, publish, reinstall app.\n"
-        "Fix B: Set SHOPIFY_LOCATION_ID from Shopify admin → "
-        "Settings → Locations (number in the page URL)."
+        "403 Forbidden — app token is missing inventory/location scopes.\n"
+        "1) Dev Dashboard → 版本 → scopes must include:\n"
+        "   read_products,write_products,read_inventory,write_inventory,read_locations\n"
+        "2) Publish the version, then 總覽 → 安裝 app → reinstall on your store.\n"
+        "3) Re-run in a NEW PowerShell window with CLIENT_ID + CLIENT_SECRET set.\n"
+        "Or set SHOPIFY_LOCATION_ID manually (Settings → Locations → ID in URL)."
     )
 
 
@@ -169,8 +207,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Set Shopify inventory for all variants.")
     parser.add_argument("--quantity", type=int, default=1, help="Available quantity (default: 1)")
     parser.add_argument("--dry-run", action="store_true", help="Preview without writing")
-    parser.add_argument("--limit", type=int, default=0, help="Process only first N variants")
+    parser.add_argument("--location-id", default="", help="Shopify location ID (or SHOPIFY_LOCATION_ID)")
     args = parser.parse_args()
+
+    if args.location_id:
+        os.environ["SHOPIFY_LOCATION_ID"] = args.location_id.strip()
 
     store = os.environ.get("SHOPIFY_STORE", "zhang-hongming-zisha-studio").strip()
     token = get_access_token(store)
