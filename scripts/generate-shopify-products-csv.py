@@ -157,12 +157,12 @@ def parse_folder(name: str) -> dict | None:
     if author == "张洪明":
         title = (
             f"Zhang Hongming Handmade Yixing Teapot – {pot_name} – "
-            f"{clay} {capacity_ml} – CNY {price_cny}"
+            f"{clay} {capacity_ml}"
         )
     else:
         title = (
             f"{author_en} Yixing Teapot – {pot_name} – "
-            f"{clay} {capacity_ml} – CNY {price_cny}"
+            f"{clay} {capacity_ml}"
         )
 
     craft_cn = f"，{craft}" if craft else ""
