@@ -207,6 +207,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Set Shopify inventory for all variants.")
     parser.add_argument("--quantity", type=int, default=1, help="Available quantity (default: 1)")
     parser.add_argument("--dry-run", action="store_true", help="Preview without writing")
+    parser.add_argument("--limit", type=int, default=0, help="Process only first N variants")
     parser.add_argument("--location-id", default="", help="Shopify location ID (or SHOPIFY_LOCATION_ID)")
     args = parser.parse_args()
 
@@ -214,6 +215,28 @@ def main() -> int:
         os.environ["SHOPIFY_LOCATION_ID"] = args.location_id.strip()
 
     store = os.environ.get("SHOPIFY_STORE", "zhang-hongming-zisha-studio").strip()
+
+    legacy = os.environ.get("SHOPIFY_ADMIN_TOKEN", "").strip()
+    has_client = bool(
+        os.environ.get("SHOPIFY_CLIENT_ID", "").strip()
+        and os.environ.get("SHOPIFY_CLIENT_SECRET", "").strip()
+    )
+    if legacy and has_client:
+        print(
+            "Note: SHOPIFY_ADMIN_TOKEN is set — using old token (may lack inventory scopes).\n"
+            "Run: Remove-Item Env:SHOPIFY_ADMIN_TOKEN -ErrorAction SilentlyContinue\n"
+            "Then use CLIENT_ID + CLIENT_SECRET only.\n",
+            file=sys.stderr,
+        )
+    elif legacy:
+        print("Auth: SHOPIFY_ADMIN_TOKEN (legacy)", file=sys.stderr)
+    elif has_client:
+        print("Auth: client_credentials (CLIENT_ID + CLIENT_SECRET)", file=sys.stderr)
+    else:
+        raise RuntimeError(
+            "Set SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET, or SHOPIFY_ADMIN_TOKEN."
+        )
+
     token = get_access_token(store)
 
     variants = fetch_variants(store, token)
