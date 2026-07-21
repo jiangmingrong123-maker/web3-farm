@@ -2,12 +2,18 @@
 
 import { useTranslations } from "next-intl";
 
-export type HubPanelId = "stats" | "equip" | "backpack" | "shop";
+export type HubPanelId = "stats" | "equip" | "companion" | "backpack" | "shop";
 
 type DockItem = {
   id: HubPanelId | "sweep";
+  labelKey:
+    | "dockStats"
+    | "dockEquip"
+    | "dockCompanion"
+    | "dockBackpack"
+    | "dockShop"
+    | "dockSweep";
   glyph: string;
-  labelKey: "dockStats" | "dockEquip" | "dockBackpack" | "dockShop" | "dockSweep";
   accent: string;
   isSweep?: boolean;
 };
@@ -15,6 +21,12 @@ type DockItem = {
 const DOCK: DockItem[] = [
   { id: "stats", glyph: "属", labelKey: "dockStats", accent: "border-sky-500/40 bg-sky-500/10 text-sky-200" },
   { id: "equip", glyph: "装", labelKey: "dockEquip", accent: "border-amber-500/40 bg-amber-500/10 text-amber-200" },
+  {
+    id: "companion",
+    glyph: "宠",
+    labelKey: "dockCompanion",
+    accent: "border-violet-500/40 bg-violet-500/10 text-violet-200",
+  },
   { id: "backpack", glyph: "包", labelKey: "dockBackpack", accent: "border-emerald-500/40 bg-emerald-500/10 text-emerald-200" },
   { id: "shop", glyph: "店", labelKey: "dockShop", accent: "border-gold/40 bg-gold/10 text-gold" },
   {
@@ -41,7 +53,7 @@ export function TdHubDock({ active, sweepOpen, onSelect, onSweep }: Props) {
       className="fixed inset-x-0 bottom-0 z-30 border-t border-white/10 bg-[#08060c]/95 backdrop-blur-md"
       style={{ paddingBottom: "max(0.35rem, env(safe-area-inset-bottom))" }}
     >
-      <div className="mx-auto grid max-w-3xl grid-cols-5 gap-1 px-2 py-1.5">
+      <div className="mx-auto grid max-w-3xl grid-cols-6 gap-0.5 px-1.5 py-1.5 sm:gap-1 sm:px-2">
         {DOCK.map((item) => {
           const isActive = item.isSweep ? sweepOpen : active === item.id;
           return (

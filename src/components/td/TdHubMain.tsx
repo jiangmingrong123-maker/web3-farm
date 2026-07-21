@@ -29,7 +29,7 @@ type Props = {
   fightRounds?: number;
   fastClearCost?: number;
   buffLabels?: string[];
-  onOpenPanel: (id: "stats" | "equip") => void;
+  onOpenPanel: (id: "stats" | "equip" | "companion") => void;
   onRefill: () => void;
   onExchangeGold: () => void;
 };
@@ -120,9 +120,13 @@ export function TdHubMain({
                 </button>
               )}
               {allySlots > 0 && (
-                <span className="text-violet-200/80">
+                <button
+                  type="button"
+                  onClick={() => onOpenPanel("companion")}
+                  className="text-violet-200/90 underline decoration-violet-400/40"
+                >
                   {t("companionDeployed", { count: allyCount, slots: allySlots })}
-                </span>
+                </button>
               )}
             </div>
 

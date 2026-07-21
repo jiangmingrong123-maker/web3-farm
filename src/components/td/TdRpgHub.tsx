@@ -11,6 +11,7 @@ import type { EquipRarity } from "@/config/td/equipment-catalog";
 import type { HeroSave } from "@/config/td/rpg";
 import { TdBackpack } from "@/components/td/TdBackpack";
 import { TdShopGearList } from "@/components/td/TdShopGearList";
+import { TdCompanionPanel } from "@/components/td/TdCompanionPanel";
 import { TdEquipPanel } from "@/components/td/TdEquipPanel";
 import { TdHubDock, hubPanelTitleKey, type HubPanelId } from "@/components/td/TdHubDock";
 import { TdHubMain } from "@/components/td/TdHubMain";
@@ -119,9 +120,18 @@ export function TdRpgHub({
   const panelContent = (() => {
     switch (panel) {
       case "stats":
-        return <TdStatAllocator save={save} locale={locale} gold={gold} onUpgrade={onUpgrade} />;
+        return <TdStatAllocator save={save} locale={locale} onUpgrade={onUpgrade} />;
       case "equip":
         return <TdEquipPanel save={save} locale={locale} onEquip={onUpgrade} />;
+      case "companion":
+        return (
+          <TdCompanionPanel
+            save={save}
+            locale={locale}
+            gold={gold}
+            onUpgrade={onUpgrade}
+          />
+        );
       case "backpack":
         return <TdBackpack save={save} locale={locale} onUpgrade={onUpgrade} />;
       case "shop":

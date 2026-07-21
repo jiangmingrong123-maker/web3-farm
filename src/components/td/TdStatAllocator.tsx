@@ -14,7 +14,6 @@ import { heroCombatStats, type HeroSave } from "@/config/td/rpg";
 import { getProtagonist, protagonistName } from "@/config/td/protagonists";
 import type { UpgradeKind } from "@/lib/td/rpg-storage";
 import { recommendStatDeltas } from "@/lib/td/stat-recommend";
-import { TdCompanionPanel } from "@/components/td/TdCompanionPanel";
 
 const STAT_KEYS: StatKey[] = ["str", "agi", "mag"];
 
@@ -23,11 +22,10 @@ const EMPTY_DRAFT: Record<StatKey, number> = { str: 0, agi: 0, mag: 0 };
 type Props = {
   save: HeroSave;
   locale: string;
-  gold: number;
   onUpgrade: (kind: UpgradeKind) => void;
 };
 
-export function TdStatAllocator({ save, locale, gold, onUpgrade }: Props) {
+export function TdStatAllocator({ save, locale, onUpgrade }: Props) {
   const t = useTranslations("td");
   const p = getProtagonist(save.protagonistId);
   const [draft, setDraft] = useState<Record<StatKey, number>>(EMPTY_DRAFT);
@@ -201,13 +199,6 @@ export function TdStatAllocator({ save, locale, gold, onUpgrade }: Props) {
           </p>
         </div>
       </div>
-
-      <TdCompanionPanel
-        save={save}
-        locale={locale}
-        gold={gold}
-        onUpgrade={onUpgrade}
-      />
     </section>
   );
 }
