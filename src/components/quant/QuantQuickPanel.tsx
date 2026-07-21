@@ -461,6 +461,9 @@ export function QuantQuickPanel({
 
       <div className="rounded-xl border border-cyan-500/20 bg-cyan-950/20 px-3 py-2.5 text-xs leading-relaxed text-cyan-100/75">
         {paperMode === "cloud" ? t("cloudIntro") : t("paperPreviewIntro")}
+        {paperMode === "cloud" && (
+          <p className="mt-1.5 text-[10px] text-cyan-100/50">{t("cloudMultiUserNote")}</p>
+        )}
       </div>
 
       {paperMode === "local" && (

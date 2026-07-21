@@ -512,6 +512,7 @@
     "cloudTickCount": "Checks",
     "cloudNeedWallet": "Connect wallet and sign in to use cloud paper.",
     "cloudKvMissing": "Cloud storage not ready — bind SWAP_KV and Cron on Cloudflare (see docs).",
+    "cloudMultiUserNote": "Cloud paper supports multiple wallets at once. Free tier is stable for about 3–5 concurrent 24/7 runners; upgrade Cloudflare for more.",
     "cloudActionFailed": "Action failed — re-sign or try later.",
     "cloudIntro": "[Cloud paper] Virtual $10,000 on Cloudflare; scheduled ticks run your rules. Tab can close; wallet required.",
     "pointsBalance": "Hall points",

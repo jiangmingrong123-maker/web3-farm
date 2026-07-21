@@ -15,10 +15,19 @@ import {
 export type QuantKv = {
   get(key: string): Promise<string | null>;
   put(key: string, value: string): Promise<void>;
+  delete?(key: string): Promise<void>;
+  list?(opts: {
+    prefix: string;
+    cursor?: string;
+  }): Promise<{ keys: { name: string }[]; list_complete: boolean; cursor?: string }>;
 };
 
-const ACTIVE_KEY = "quant:active_wallets";
+/** 旧版：全体活跃钱包挤在一个 key（并发 start 会互相覆盖） */
+const ACTIVE_KEY_LEGACY = "quant:active_wallets";
+/** 新版：每人一个 key，避免多人同时开跑丢名单 */
+const ACTIVE_PREFIX = "quant:active:";
 const stateKey = (wallet: string) => `quant:paper:${wallet}`;
+const activeKey = (wallet: string) => `${ACTIVE_PREFIX}${wallet.toLowerCase()}`;
 
 const memoryStates = new Map<string, CloudPaperState>();
 const memoryActive = new Set<string>();
@@ -44,40 +53,63 @@ export async function savePaper(kv: QuantKv | undefined, wallet: string, state: 
   memoryStates.set(wallet, state);
 }
 
-async function loadActive(kv: QuantKv | undefined): Promise<string[]> {
-  if (kv) {
-    const raw = await kv.get(ACTIVE_KEY);
-    if (!raw) return [];
-    try {
-      return JSON.parse(raw) as string[];
-    } catch {
-      return [];
+async function loadActiveFromPrefix(kv: QuantKv): Promise<string[]> {
+  if (!kv.list) return [];
+  const out: string[] = [];
+  let cursor: string | undefined;
+  do {
+    const page = await kv.list({ prefix: ACTIVE_PREFIX, cursor });
+    for (const k of page.keys) {
+      const w = k.name.slice(ACTIVE_PREFIX.length).toLowerCase();
+      if (!/^0x[a-f0-9]{40}$/.test(w)) continue;
+      const flag = await kv.get(k.name);
+      if (flag === "1") out.push(w);
     }
-  }
-  return [...memoryActive];
+    cursor = page.list_complete ? undefined : page.cursor;
+  } while (cursor);
+  return out;
 }
 
-async function saveActive(kv: QuantKv | undefined, wallets: string[]): Promise<void> {
-  const unique = [...new Set(wallets.map((w) => w.toLowerCase()))];
-  if (kv) {
-    await kv.put(ACTIVE_KEY, JSON.stringify(unique));
-    return;
+async function loadActiveLegacy(kv: QuantKv): Promise<string[]> {
+  const raw = await kv.get(ACTIVE_KEY_LEGACY);
+  if (!raw) return [];
+  try {
+    return (JSON.parse(raw) as string[]).map((w) => w.toLowerCase());
+  } catch {
+    return [];
   }
-  memoryActive.clear();
-  unique.forEach((w) => memoryActive.add(w));
+}
+
+async function loadActive(kv: QuantKv | undefined): Promise<string[]> {
+  if (!kv) return [...memoryActive];
+  const fromPrefix = await loadActiveFromPrefix(kv);
+  const fromLegacy = await loadActiveLegacy(kv);
+  return [...new Set([...fromPrefix, ...fromLegacy])];
 }
 
 export async function addActiveWallet(kv: QuantKv | undefined, wallet: string): Promise<void> {
-  const list = await loadActive(kv);
   const w = wallet.toLowerCase();
-  if (!list.includes(w)) list.push(w);
-  await saveActive(kv, list);
+  if (kv) {
+    await kv.put(activeKey(w), "1");
+    return;
+  }
+  memoryActive.add(w);
 }
 
 export async function removeActiveWallet(kv: QuantKv | undefined, wallet: string): Promise<void> {
   const w = wallet.toLowerCase();
-  const list = (await loadActive(kv)).filter((x) => x !== w);
-  await saveActive(kv, list);
+  if (kv) {
+    if (kv.delete) await kv.delete(activeKey(w));
+    else await kv.put(activeKey(w), "");
+    // 顺带从旧名单里摘掉，避免 cron 重复处理已停止的钱包
+    const legacy = await loadActiveLegacy(kv);
+    if (legacy.includes(w)) {
+      const next = legacy.filter((x) => x !== w);
+      await kv.put(ACTIVE_KEY_LEGACY, JSON.stringify(next));
+    }
+    return;
+  }
+  memoryActive.delete(w);
 }
 
 export async function tickPaperState(
