@@ -3,6 +3,7 @@
 import { useTranslations } from "next-intl";
 import { TdQuestTracker } from "@/components/td/TdQuestTracker";
 import { ProtagonistAvatar } from "@/components/td/TdHeroPicker";
+import { pickHubProgressTip } from "@/config/td/progression-feedback";
 import { STAMINA_MAX } from "@/config/td/economy";
 import { expLevelProgress } from "@/config/td/hero-levels";
 import { heroCombatStats, type HeroSave } from "@/config/td/rpg";
@@ -19,6 +20,7 @@ type Props = {
   loading?: boolean;
   refillCost: number;
   goldExchangeCost: number;
+  mapSweepUnlocked?: boolean;
   fightMapId?: number;
   fightScene?: number;
   fightRounds?: number;
@@ -38,6 +40,7 @@ export function TdHubMain({
   loading,
   refillCost,
   goldExchangeCost,
+  mapSweepUnlocked = false,
   fightMapId,
   fightScene,
   fightRounds,
@@ -54,6 +57,16 @@ export function TdHubMain({
   const points = Math.floor(farmPoints);
   const zone = fightMapId != null ? getZone(fightMapId) : null;
   const fightName = zone ? zoneName(zone, locale) : null;
+  const tipKind = pickHubProgressTip({
+    heroLevel: save.level,
+    recommendLevel: zone?.recommendLevel ?? null,
+    statPoints: save.statPoints,
+    inventoryCount: save.inventory.length,
+    stamina,
+    mapSweepUnlocked,
+    clearedMaps: Math.max(0, save.worldMap - 1),
+  });
+  const tipText = t(`hubTip_${tipKind}` as "hubTip_pushFight");
 
   return (
     <section className="space-y-2">
@@ -182,12 +195,17 @@ export function TdHubMain({
                   {t("hubBagCount", { count: save.inventory.length })}
                 </p>
               )}
+              <p className="mt-2 rounded-md border border-emerald-500/25 bg-emerald-500/10 px-2 py-1.5 text-[10px] leading-snug text-emerald-100/90">
+                <span className="font-semibold text-emerald-200/90">{t("hubTipLabel")} </span>
+                {tipText}
+              </p>
             </div>
           )}
         </div>
       </div>
 
       <TdQuestTracker save={save} locale={locale} />
+      <p className="px-0.5 text-[9px] leading-snug text-white/30">{t("feedbackHintShort")}</p>
     </section>
   );
 }

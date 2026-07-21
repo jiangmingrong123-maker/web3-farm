@@ -2,11 +2,20 @@ import {
   BATTLE_TUNING,
   enemyCountTier,
 } from "@/config/td/battle-squads";
+import { earlyMapCombatMult } from "@/config/td/progression-feedback";
 import type { ZoneEnemy } from "@/config/td/rpg";
 import { getZone, SCENES_PER_MAP } from "@/config/td/zones";
 
 function scale(mapId: number): number {
   return 1 + (mapId - 1) * 0.08;
+}
+
+function applyEarly(mapId: number, stats: { hp: number; atk: number }) {
+  const m = earlyMapCombatMult(mapId);
+  return {
+    hp: Math.max(1, Math.floor(stats.hp * m.hp)),
+    atk: Math.max(1, Math.round(stats.atk * m.atk * 10) / 10),
+  };
 }
 
 function mobStats(mapId: number, rl: number, scene: number, mult = 1): {
@@ -16,14 +25,14 @@ function mobStats(mapId: number, rl: number, scene: number, mult = 1): {
   const sc = scale(mapId);
   const hp = Math.floor((26 + rl * 5 + scene * 3) * sc * mult);
   const atk = Math.round((6 + rl * 0.9 + scene * 0.35) * sc * mult * 10) / 10;
-  return { hp, atk };
+  return applyEarly(mapId, { hp, atk });
 }
 
 function bossStats(mapId: number, rl: number, mult = 1): { hp: number; atk: number } {
   const bossScale = 1.5 + mapId * 0.035;
   const hp = Math.floor((36 + rl * 9) * bossScale * mult);
   const atk = Math.round((10 + rl * 1.15) * bossScale * mult * 10) / 10;
-  return { hp, atk };
+  return applyEarly(mapId, { hp, atk });
 }
 
 function miniBossStats(mapId: number, rl: number): { hp: number; atk: number } {

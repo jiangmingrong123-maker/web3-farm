@@ -239,6 +239,7 @@ export function TdRpgHub({
         loading={loading}
         refillCost={refillCost}
         goldExchangeCost={goldExchangeCost}
+        mapSweepUnlocked={mapSweepUnlocked}
         fightMapId={fightMapId}
         fightScene={fightScene}
         fightRounds={fightRounds}

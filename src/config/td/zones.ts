@@ -1,5 +1,7 @@
 /** 怪物区域 · 第一批 1–20（合规名称 · 来自设计表） */
 
+import { earlyMapExpMult } from "@/config/td/progression-feedback";
+
 export type ZoneDef = {
   id: number;
   nameZh: string;
@@ -13,7 +15,7 @@ export type ZoneDef = {
   note?: string;
 };
 
-/** 设计表「单场经验」· SCENE_EXP_MULTIPLIER 可全局微调 */
+/** 设计表「单场经验」· SCENE_EXP_MULTIPLIER 可全局微调；前期地图另见 earlyMapExpMult */
 export const SCENE_EXP_MULTIPLIER = 1.1;
 
 export function sceneExpFromZone(
@@ -27,7 +29,10 @@ export function sceneExpFromZone(
     scene >= scenesPerMap
       ? Math.max(7, Math.round(base * 1.32))
       : Math.max(4, base);
-  return Math.max(1, Math.floor(raw * SCENE_EXP_MULTIPLIER));
+  return Math.max(
+    1,
+    Math.floor(raw * SCENE_EXP_MULTIPLIER * earlyMapExpMult(mapId)),
+  );
 }
 
 export const ZONES_BATCH1: ZoneDef[] = [

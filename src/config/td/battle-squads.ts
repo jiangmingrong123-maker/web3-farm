@@ -60,8 +60,8 @@ export const ENEMY_COUNT_TIERS: {
   /** BOSS 关额外带入前几图 BOSS 当小 BOSS 的数量 */
   priorBossMini: number;
 }[] = [
-  { minMap: 1, normalMobs: 2, bossMinions: 2, priorBossMini: 0 },
-  { minMap: 4, normalMobs: 3, bossMinions: 2, priorBossMini: 0 },
+  { minMap: 1, normalMobs: 2, bossMinions: 1, priorBossMini: 0 },
+  { minMap: 6, normalMobs: 3, bossMinions: 2, priorBossMini: 0 },
   { minMap: 8, normalMobs: 4, bossMinions: 3, priorBossMini: 1 },
   { minMap: 12, normalMobs: 5, bossMinions: 4, priorBossMini: 2 },
   { minMap: 16, normalMobs: 6, bossMinions: 5, priorBossMini: 3 },
