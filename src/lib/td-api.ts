@@ -1,5 +1,6 @@
 import { buildFarmSignMessage } from "./farm-sign";
 import { apiRoot } from "./api-origin";
+import type { HeroSave } from "@/config/td/rpg";
 
 const API = `${apiRoot()}/td`;
 
@@ -25,6 +26,11 @@ export type TdProfile = {
 };
 
 export type TdSignFn = (message: string) => Promise<`0x${string}`>;
+
+export type HeroCloudPayload = {
+  heroSave: HeroSave;
+  heroUpdatedAt: number;
+};
 
 async function signedPost<T>(
   wallet: string,
@@ -55,6 +61,8 @@ export async function fetchTdProfileApi(wallet: string): Promise<{
   farmPoints: number;
   refillCost: number;
   goldExchangeCost: number;
+  heroSave: HeroSave | null;
+  heroUpdatedAt: number;
 } | null> {
   try {
     const res = await fetch(`${API}/${wallet.toLowerCase()}`, { cache: "no-store" });
@@ -65,6 +73,8 @@ export async function fetchTdProfileApi(wallet: string): Promise<{
       farmPoints?: number;
       refillCost?: number;
       goldExchangeCost?: number;
+      heroSave?: HeroSave | null;
+      heroUpdatedAt?: number;
     };
     if (!data.ok || !data.profile) return null;
     return {
@@ -72,6 +82,8 @@ export async function fetchTdProfileApi(wallet: string): Promise<{
       farmPoints: data.farmPoints ?? 0,
       refillCost: data.refillCost ?? 0,
       goldExchangeCost: data.goldExchangeCost ?? 0,
+      heroSave: data.heroSave ?? null,
+      heroUpdatedAt: data.heroUpdatedAt ?? 0,
     };
   } catch {
     return null;
@@ -124,6 +136,7 @@ export async function finishTdRunApi(
     cleared: boolean;
     wavesReached: number;
     finishToken?: string;
+    hero?: HeroCloudPayload;
   },
 ): Promise<{ profile: TdProfile; goldEarned: number; cleared: boolean } | null> {
   try {
@@ -132,6 +145,10 @@ export async function finishTdRunApi(
       cleared: payload.cleared,
       wavesReached: payload.wavesReached,
     };
+    if (payload.hero) {
+      body.heroSave = payload.hero.heroSave;
+      body.heroUpdatedAt = payload.hero.heroUpdatedAt;
+    }
     if (payload.finishToken) {
       body.finishToken = payload.finishToken;
     } else {
@@ -228,12 +245,18 @@ export async function mapSweepStaminaApi(
   wallet: string,
   sign: TdSignFn,
   runs: number,
+  hero?: HeroCloudPayload,
 ): Promise<TdProfile | null> {
   const data = await signedPost<{ ok?: boolean; profile?: TdProfile }>(
     wallet,
     "map-sweep",
     "td-map-sweep",
-    { runs },
+    {
+      runs,
+      ...(hero
+        ? { heroSave: hero.heroSave, heroUpdatedAt: hero.heroUpdatedAt }
+        : {}),
+    },
     sign,
     `runs=${runs}`,
   );
@@ -245,6 +268,7 @@ export async function fastClearStaminaApi(
   sign: TdSignFn,
   cost: number,
   sceneWon: boolean,
+  hero?: HeroCloudPayload,
 ): Promise<{ profile: TdProfile; goldEarned: number } | null> {
   const data = await signedPost<{
     ok?: boolean;
@@ -254,10 +278,73 @@ export async function fastClearStaminaApi(
     wallet,
     "fast-clear",
     "td-fast-clear",
-    { cost, sceneWon },
+    {
+      cost,
+      sceneWon,
+      ...(hero
+        ? { heroSave: hero.heroSave, heroUpdatedAt: hero.heroUpdatedAt }
+        : {}),
+    },
     sign,
     `cost=${cost}:won=${sceneWon ? 1 : 0}`,
   );
   if (!data?.ok || !data.profile) return null;
   return { profile: data.profile, goldEarned: data.goldEarned ?? 0 };
+}
+
+export async function authTdRpgSyncApi(
+  wallet: string,
+  sign: TdSignFn,
+): Promise<{ syncToken: string; expiresAt: number } | null> {
+  const data = await signedPost<{
+    ok?: boolean;
+    syncToken?: string;
+    expiresAt?: number;
+  }>(wallet, "rpg-sync-auth", "td-rpg-sync-auth", {}, sign);
+  if (!data?.ok || !data.syncToken || !data.expiresAt) return null;
+  return { syncToken: data.syncToken, expiresAt: data.expiresAt };
+}
+
+export async function saveTdRpgApi(
+  wallet: string,
+  hero: HeroCloudPayload,
+  auth: { syncToken: string } | { sign: TdSignFn },
+): Promise<{ saved: boolean; heroUpdatedAt: number } | null> {
+  try {
+    const body: Record<string, unknown> = {
+      heroSave: hero.heroSave,
+      heroUpdatedAt: hero.heroUpdatedAt,
+    };
+    if ("syncToken" in auth) {
+      body.syncToken = auth.syncToken;
+    } else {
+      const timestamp = Date.now();
+      const message = buildFarmSignMessage(
+        "td-rpg-save",
+        wallet,
+        timestamp,
+        `updatedAt=${hero.heroUpdatedAt}`,
+      );
+      body.timestamp = timestamp;
+      body.signature = await auth.sign(message);
+    }
+    const res = await fetch(`${API}/${wallet.toLowerCase()}/rpg-save`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      ok?: boolean;
+      saved?: boolean;
+      heroUpdatedAt?: number;
+    };
+    if (!data?.ok) return null;
+    return {
+      saved: !!data.saved,
+      heroUpdatedAt: data.heroUpdatedAt ?? hero.heroUpdatedAt,
+    };
+  } catch {
+    return null;
+  }
 }

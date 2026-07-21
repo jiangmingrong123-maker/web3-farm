@@ -35,10 +35,16 @@ import {
   applyUpgrade,
   discardInventoryGold,
   loadHeroSave,
+  loadHeroUpdatedAt,
   saveHeroSave,
   upgradeCost,
   type UpgradeKind,
 } from "@/lib/td/rpg-storage";
+import {
+  mergeHeroWithCloud,
+  queueHeroCloudUpload,
+  toHeroCloudPayload,
+} from "@/lib/td/rpg-cloud-sync";
 import {
   DEMO_FARM_POINTS,
   applyDailyProfileReset,
@@ -184,6 +190,20 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
     setScreen("hub");
   }, []);
 
+  const walletKey = demoMode ? "demo" : address ?? "";
+
+  const persistHero = useCallback(
+    (save: HeroSave, opts?: { upload?: boolean }) => {
+      const updatedAt = Date.now();
+      heroSaveRef.current = save;
+      setHeroSave(save);
+      saveHeroSave(walletKey || "demo", save, updatedAt);
+      if (opts?.upload === false || demoMode || !address) return;
+      queueHeroCloudUpload(address, save, updatedAt, sign, { force: true });
+    },
+    [address, demoMode, sign, walletKey],
+  );
+
   const refresh = useCallback(async () => {
     if (demoMode) return;
     if (!address) return;
@@ -202,7 +222,15 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
     setRefillCost(data.refillCost);
     setGoldExchangeCost(data.goldExchangeCost);
     buffsRef.current = activeBuffIds(p);
-  }, [address, t, demoMode]);
+
+    const merged = mergeHeroWithCloud(address, data.heroSave, data.heroUpdatedAt);
+    heroSaveRef.current = merged.save;
+    setHeroSave(merged.save);
+    // 本机进度更靠前时上传云端（可能需签一次开通同步令牌）
+    if (merged.needsUpload) {
+      queueHeroCloudUpload(address, merged.save, merged.updatedAt, sign);
+    }
+  }, [address, t, demoMode, sign]);
 
   useEffect(() => {
     if (!demoMode || !profile) return;
@@ -225,8 +253,11 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
   }, [isConnected, address, refresh, demoMode]);
 
   useEffect(() => {
-    const wallet = demoMode ? "demo" : address;
-    if (wallet) setHeroSave(loadHeroSave(wallet));
+    if (demoMode) {
+      setHeroSave(loadHeroSave("demo"));
+      return;
+    }
+    if (!address) setHeroSave(defaultHeroSave());
   }, [address, demoMode]);
 
   useEffect(() => {
@@ -244,8 +275,6 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
   useEffect(() => {
     activeRunIdRef.current = profile?.activeRunId ?? null;
   }, [profile?.activeRunId]);
-
-  const walletKey = demoMode ? "demo" : address ?? "";
 
   useEffect(() => {
     if (!walletKey) return;
@@ -280,9 +309,7 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
         climbState.monsterKills,
         locale,
       );
-      heroSaveRef.current = reward.save;
-      setHeroSave(reward.save);
-      saveHeroSave(walletKey, reward.save);
+      persistHero(reward.save);
       if (runKey) rewardedRunRef.current = runKey;
       for (const q of reward.questLogs) {
         pushLog(q.text, "system");
@@ -295,7 +322,7 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
         "battle",
       );
     },
-    [pushLog, t, walletKey, locale],
+    [persistHero, pushLog, t, locale],
   );
 
   const persistActiveRun = useCallback(
@@ -399,6 +426,10 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
           cleared,
           wavesReached,
           finishToken: token,
+          hero: toHeroCloudPayload(
+            heroSaveRef.current,
+            loadHeroUpdatedAt(walletKey) || Date.now(),
+          ),
         });
         if (res) {
           if (gen != null && gen !== settleGenRef.current) return false;
@@ -484,9 +515,7 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
       if (plan.skipped.length > 0) {
         save = applySkippedProgress(save, plan.skipped);
         save = syncHeroLevel({ ...save, exp: save.exp + plan.skippedExp });
-        heroSaveRef.current = save;
-        setHeroSave(save);
-        saveHeroSave(walletKey, save);
+        persistHero(save);
       }
 
       const fightRun = createClimbRun(plan.fightMapId, plan.fightScene);
@@ -548,7 +577,7 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
       else playTdSfx("defeat");
       grantRunRewards(state);
     },
-    [grantRunRewards, locale, persistActiveRun, walletKey],
+    [grantRunRewards, locale, persistActiveRun, persistHero, walletKey],
   );
 
   useEffect(() => {
@@ -728,9 +757,7 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
       setProfile(spent);
       setRefillCost(demoRefillCost(spent));
       setGoldExchangeCost(demoGoldExchangeCost(spent));
-      heroSaveRef.current = preview.save;
-      setHeroSave(preview.save);
-      saveHeroSave(walletKey, preview.save);
+      persistHero(preview.save);
       pushLog(preview.summary, "battle");
       if (preview.sceneWon) playTdSfx("victory");
       return;
@@ -740,20 +767,20 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
       setLoading(false);
       return;
     }
+    persistHero(preview.save, { upload: false });
     const cleared = await fastClearStaminaApi(
       address,
       sign,
       cost,
       preview.sceneWon,
+      toHeroCloudPayload(preview.save, loadHeroUpdatedAt(walletKey) || Date.now()),
     );
     setLoading(false);
     if (!cleared) {
       setError(t("startFailed"));
       return;
     }
-    heroSaveRef.current = preview.save;
-    setHeroSave(preview.save);
-    saveHeroSave(walletKey, preview.save);
+    persistHero(preview.save);
     setProfile(cleared.profile);
     profileRef.current = cleared.profile;
     pushLog(
@@ -870,9 +897,7 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
       const nextProfile = { ...spent, gold: spent.gold + preview.goldGained };
       profileRef.current = nextProfile;
       setProfile(nextProfile);
-      heroSaveRef.current = preview.save;
-      setHeroSave(preview.save);
-      saveHeroSave(walletKey, preview.save);
+      persistHero(preview.save);
       pushSweepLogs(preview.log);
       playTdSfx("victory");
       return;
@@ -881,7 +906,13 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
       setSweepLoading(false);
       return;
     }
-    const spent = await mapSweepStaminaApi(address, sign, runs);
+    persistHero(preview.save, { upload: false });
+    const spent = await mapSweepStaminaApi(
+      address,
+      sign,
+      runs,
+      toHeroCloudPayload(preview.save, loadHeroUpdatedAt(walletKey) || Date.now()),
+    );
     setSweepLoading(false);
     if (!spent) {
       setError(t("mapSweepFailed"));
@@ -890,9 +921,7 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
     const nextProfile = { ...spent, gold: spent.gold + preview.goldGained };
     profileRef.current = nextProfile;
     setProfile(nextProfile);
-    heroSaveRef.current = preview.save;
-    setHeroSave(preview.save);
-    saveHeroSave(walletKey, preview.save);
+    persistHero(preview.save);
     pushSweepLogs(preview.log);
     playTdSfx("victory");
   };
@@ -909,9 +938,7 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
         const gold = discardInventoryGold(kind.itemId);
         const next = applyUpgrade(heroSave, kind);
         if (!next) return;
-        setHeroSave(next);
-        heroSaveRef.current = next;
-        saveHeroSave(walletKey, next);
+        persistHero(next);
         if (profile && gold > 0) {
           const np = { ...profile, gold: profile.gold + gold };
           setProfile(np);
@@ -923,8 +950,7 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
       }
       const next = applyUpgrade(heroSave, kind);
       if (!next) return;
-      setHeroSave(next);
-      saveHeroSave(walletKey, next);
+      persistHero(next);
       setError(null);
       return;
     }
@@ -941,8 +967,7 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
         return;
       }
       setProfile(res.profile);
-      setHeroSave(res.hero);
-      saveHeroSave(walletKey, res.hero);
+      persistHero(res.hero);
       setError(null);
       return;
     }
@@ -952,8 +977,7 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
       return;
     }
     setProfile({ ...profile, gold: profile.gold - cost });
-    setHeroSave(nextHero);
-    saveHeroSave(walletKey, nextHero);
+    persistHero(nextHero);
     setError(null);
   };
 
@@ -968,9 +992,7 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
       }
       setProfile(res.profile);
       profileRef.current = res.profile;
-      setHeroSave(res.hero);
-      heroSaveRef.current = res.hero;
-      saveHeroSave(walletKey, res.hero);
+      persistHero(res.hero);
       setError(null);
       return;
     }

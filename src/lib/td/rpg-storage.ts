@@ -185,6 +185,54 @@ function migrateSave(parsed: Record<string, unknown>): HeroSave {
   );
 }
 
+/** 用于云端/本机冲突时比较进度（地图 > 场景 > 等级 > 经验） */
+export function heroProgressScore(save: HeroSave): number {
+  return (
+    Math.max(1, save.worldMap) * 1_000_000 +
+    Math.max(1, save.worldScene) * 10_000 +
+    Math.max(1, save.level) * 1_000 +
+    Math.max(0, save.exp)
+  );
+}
+
+export function parseHeroSave(raw: unknown): HeroSave | null {
+  if (!raw || typeof raw !== "object") return null;
+  try {
+    return sanitizeEquipped(migrateSave(raw as Record<string, unknown>));
+  } catch {
+    return null;
+  }
+}
+
+/** 取进度更靠前的存档；进度相同则取更新时间更晚的 */
+export function pickBetterHeroSave(
+  a: HeroSave,
+  aUpdatedAt: number,
+  b: HeroSave,
+  bUpdatedAt: number,
+): { save: HeroSave; updatedAt: number; source: "a" | "b" } {
+  const sa = heroProgressScore(a);
+  const sb = heroProgressScore(b);
+  if (sa > sb) return { save: a, updatedAt: aUpdatedAt, source: "a" };
+  if (sb > sa) return { save: b, updatedAt: bUpdatedAt, source: "b" };
+  if (bUpdatedAt > aUpdatedAt) return { save: b, updatedAt: bUpdatedAt, source: "b" };
+  return { save: a, updatedAt: aUpdatedAt, source: "a" };
+}
+
+const META_KEY = "td_rpg_meta";
+
+export function loadHeroUpdatedAt(wallet: string): number {
+  if (typeof window === "undefined") return 0;
+  try {
+    const raw = localStorage.getItem(`${META_KEY}:${wallet.toLowerCase()}`);
+    if (!raw) return 0;
+    const n = Number(JSON.parse(raw)?.updatedAt);
+    return Number.isFinite(n) ? n : 0;
+  } catch {
+    return 0;
+  }
+}
+
 export function loadHeroSave(wallet: string): HeroSave {
   if (typeof window === "undefined") return defaultHeroSave();
   try {
@@ -203,13 +251,15 @@ export function resetHeroSave(wallet: string): HeroSave {
   return fresh;
 }
 
-export function saveHeroSave(wallet: string, save: HeroSave) {
+export function saveHeroSave(wallet: string, save: HeroSave, updatedAt = Date.now()) {
   if (typeof window === "undefined") return;
   const synced = syncHeroLevel(save);
+  const w = wallet.toLowerCase();
   localStorage.setItem(
-    `${KEY}:${wallet.toLowerCase()}`,
+    `${KEY}:${w}`,
     JSON.stringify({ ...synced, saveVersion: HERO_SAVE_VERSION }),
   );
+  localStorage.setItem(`${META_KEY}:${w}`, JSON.stringify({ updatedAt }));
 }
 
 export type UpgradeKind =

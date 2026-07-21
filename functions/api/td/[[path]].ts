@@ -1,10 +1,12 @@
 /**
- * GET  /api/td/:wallet              — profile (gold, stamina, buffs, stage)
+ * GET  /api/td/:wallet              — profile + cloud heroSave (gold, stamina, buffs, stage)
  * POST /api/td/:wallet/refill-stamina — points → +100 stamina (signed)
  * POST /api/td/:wallet/exchange-gold  — points → gold, escalating cost (signed)
  * POST /api/td/:wallet/start        — begin run, -5 stamina (signed)
- * POST /api/td/:wallet/finish       — settle run gold (signed)
+ * POST /api/td/:wallet/finish       — settle run gold (signed); optional heroSave sync
  * POST /api/td/:wallet/shop-buy     — buy 24h buff (signed)
+ * POST /api/td/:wallet/rpg-sync-auth — one-time signature → syncToken (7d)
+ * POST /api/td/:wallet/rpg-save     — upload heroSave (syncToken or signature)
  */
 
 import { requireWalletSignature, type SignedBody } from "../../lib/farm-sign";
@@ -23,6 +25,8 @@ const MAP_SWEEP_RUNS_MAX = 10;
 const FAST_CLEAR_STAMINA_MAX = 1;
 const RUN_STALE_MS = 20 * 60 * 1000;
 const FAIL_CONSOLATION_GOLD = 3;
+const RPG_SYNC_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const RPG_HERO_MAX_BYTES = 200_000;
 
 const SHOP: Record<string, { price: number; kind: "passive" | "active" }> = {
   notice: { price: 25, kind: "passive" },
@@ -79,6 +83,16 @@ interface ActiveRun {
   finishToken?: string;
 }
 
+interface RpgCloud {
+  hero: Record<string, unknown>;
+  updatedAt: number;
+}
+
+interface RpgSyncSession {
+  token: string;
+  expiresAt: number;
+}
+
 const NO_CACHE = withCors({
   "Content-Type": "application/json",
   "Cache-Control": "no-store, no-cache, must-revalidate",
@@ -87,6 +101,8 @@ const NO_CACHE = withCors({
 const memoryTd = new Map<string, TdProfile>();
 const memoryRuns = new Map<string, ActiveRun>();
 const memoryFarm = new Map<string, FarmState>();
+const memoryRpg = new Map<string, RpgCloud>();
+const memoryRpgSync = new Map<string, RpgSyncSession>();
 
 function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), { status, headers: NO_CACHE });
@@ -243,6 +259,112 @@ async function deleteRun(env: Env, runId: string) {
   }
 }
 
+function roughHeroProgress(hero: Record<string, unknown>): number {
+  const map = Math.max(1, Number(hero.worldMap) || 1);
+  const scene = Math.max(1, Number(hero.worldScene) || 1);
+  const level = Math.max(1, Number(hero.level) || 1);
+  const exp = Math.max(0, Number(hero.exp) || 0);
+  return map * 1_000_000 + scene * 10_000 + level * 1_000 + exp;
+}
+
+function isHeroPayload(raw: unknown): raw is Record<string, unknown> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
+  try {
+    return JSON.stringify(raw).length <= RPG_HERO_MAX_BYTES;
+  } catch {
+    return false;
+  }
+}
+
+async function loadRpg(env: Env, wallet: string): Promise<RpgCloud | null> {
+  const key = `td_rpg:${wallet}`;
+  if (env.SWAP_KV) {
+    const raw = await env.SWAP_KV.get(key);
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw) as RpgCloud;
+      if (!parsed?.hero || typeof parsed.hero !== "object") return null;
+      return {
+        hero: parsed.hero,
+        updatedAt: Number(parsed.updatedAt) || 0,
+      };
+    } catch {
+      return null;
+    }
+  }
+  return memoryRpg.get(wallet) ?? null;
+}
+
+async function saveRpg(
+  env: Env,
+  wallet: string,
+  hero: Record<string, unknown>,
+  updatedAt: number,
+): Promise<{ saved: boolean; cloud: RpgCloud }> {
+  const incoming: RpgCloud = { hero, updatedAt: Math.max(0, updatedAt) || Date.now() };
+  const existing = await loadRpg(env, wallet);
+  if (existing) {
+    const inScore = roughHeroProgress(incoming.hero);
+    const exScore = roughHeroProgress(existing.hero);
+    if (inScore < exScore) return { saved: false, cloud: existing };
+    if (inScore === exScore && incoming.updatedAt < existing.updatedAt) {
+      return { saved: false, cloud: existing };
+    }
+  }
+  const key = `td_rpg:${wallet}`;
+  if (env.SWAP_KV) {
+    await env.SWAP_KV.put(key, JSON.stringify(incoming));
+  } else {
+    memoryRpg.set(wallet, incoming);
+  }
+  return { saved: true, cloud: incoming };
+}
+
+async function maybeSaveHeroFromBody(
+  env: Env,
+  wallet: string,
+  body: { heroSave?: unknown; heroUpdatedAt?: unknown },
+): Promise<void> {
+  if (!isHeroPayload(body.heroSave)) return;
+  const updatedAt = Number(body.heroUpdatedAt) || Date.now();
+  await saveRpg(env, wallet, body.heroSave, updatedAt);
+}
+
+async function loadRpgSync(env: Env, wallet: string): Promise<RpgSyncSession | null> {
+  const key = `td_rpg_sync:${wallet}`;
+  if (env.SWAP_KV) {
+    const raw = await env.SWAP_KV.get(key);
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as RpgSyncSession;
+    } catch {
+      return null;
+    }
+  }
+  return memoryRpgSync.get(wallet) ?? null;
+}
+
+async function saveRpgSync(env: Env, wallet: string, session: RpgSyncSession) {
+  const key = `td_rpg_sync:${wallet}`;
+  if (env.SWAP_KV) {
+    await env.SWAP_KV.put(key, JSON.stringify(session));
+  } else {
+    memoryRpgSync.set(wallet, session);
+  }
+}
+
+async function validateRpgSyncToken(
+  env: Env,
+  wallet: string,
+  token: string | undefined,
+): Promise<boolean> {
+  if (!token || typeof token !== "string" || token.length < 16) return false;
+  const session = await loadRpgSync(env, wallet);
+  if (!session || session.token !== token) return false;
+  if (Date.now() > session.expiresAt) return false;
+  return true;
+}
+
 function refillCost(profile: TdProfile): number {
   return REFILL_BASE_POINTS * 2 ** profile.refillCountToday;
 }
@@ -282,12 +404,15 @@ export const onRequest = async (context: {
     profile = await reconcileActiveRun(env, profile, now);
     const farm = await loadFarm(env, wallet);
     const saved = await saveTd(env, wallet, profile);
+    const rpg = await loadRpg(env, wallet);
     return json({
       ok: true,
       profile: saved,
       farmPoints: farm.points,
       refillCost: refillCost(saved),
       goldExchangeCost: goldExchangeCost(saved),
+      heroSave: rpg?.hero ?? null,
+      heroUpdatedAt: rpg?.updatedAt ?? 0,
     });
   }
 
@@ -392,6 +517,8 @@ export const onRequest = async (context: {
         cleared?: boolean;
         wavesReached?: number;
         finishToken?: string;
+        heroSave?: unknown;
+        heroUpdatedAt?: unknown;
       }
     >(request);
     if (!body) return new Response("Bad JSON", { status: 400 });
@@ -442,6 +569,7 @@ export const onRequest = async (context: {
     };
     const saved = await saveTd(env, wallet, profile);
     await deleteRun(env, runId);
+    await maybeSaveHeroFromBody(env, wallet, body);
 
     return json({ ok: true, profile: saved, goldEarned, cleared });
   }
@@ -480,7 +608,14 @@ export const onRequest = async (context: {
   }
 
   if (path[1] === "fast-clear" && request.method === "POST") {
-    const body = await parseJson<SignedBody & { cost?: number; sceneWon?: boolean }>(request);
+    const body = await parseJson<
+      SignedBody & {
+        cost?: number;
+        sceneWon?: boolean;
+        heroSave?: unknown;
+        heroUpdatedAt?: unknown;
+      }
+    >(request);
     if (!body) return new Response("Bad JSON", { status: 400 });
     const cost = Math.max(1, Math.min(FAST_CLEAR_STAMINA_MAX, Number(body.cost) || 1));
     const sceneWon = !!body.sceneWon;
@@ -517,11 +652,14 @@ export const onRequest = async (context: {
       gold: profile.gold + goldEarned,
     };
     const saved = await saveTd(env, wallet, profile);
+    await maybeSaveHeroFromBody(env, wallet, body);
     return json({ ok: true, profile: saved, goldEarned });
   }
 
   if (path[1] === "map-sweep" && request.method === "POST") {
-    const body = await parseJson<SignedBody & { runs?: number }>(request);
+    const body = await parseJson<
+      SignedBody & { runs?: number; heroSave?: unknown; heroUpdatedAt?: unknown }
+    >(request);
     if (!body) return new Response("Bad JSON", { status: 400 });
     const runs = Math.max(1, Math.min(MAP_SWEEP_RUNS_MAX, Number(body.runs) || 1));
     const auth = await requireWalletSignature("td-map-sweep", wallet, body, `runs=${runs}`);
@@ -540,7 +678,52 @@ export const onRequest = async (context: {
     }
     profile = { ...profile, stamina: profile.stamina - cost };
     const saved = await saveTd(env, wallet, profile);
+    await maybeSaveHeroFromBody(env, wallet, body);
     return json({ ok: true, profile: saved });
+  }
+
+  if (path[1] === "rpg-sync-auth" && request.method === "POST") {
+    const body = await parseJson<SignedBody>(request);
+    if (!body) return new Response("Bad JSON", { status: 400 });
+    const auth = await requireWalletSignature("td-rpg-sync-auth", wallet, body);
+    if (auth) return auth;
+
+    const token = crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
+    const expiresAt = Date.now() + RPG_SYNC_TTL_MS;
+    await saveRpgSync(env, wallet, { token, expiresAt });
+    return json({ ok: true, syncToken: token, expiresAt });
+  }
+
+  if (path[1] === "rpg-save" && request.method === "POST") {
+    const body = await parseJson<
+      SignedBody & {
+        syncToken?: string;
+        heroSave?: unknown;
+        heroUpdatedAt?: unknown;
+      }
+    >(request);
+    if (!body) return new Response("Bad JSON", { status: 400 });
+    if (!isHeroPayload(body.heroSave)) {
+      return json({ ok: false, error: "BAD_HERO" }, 400);
+    }
+    const updatedAt = Number(body.heroUpdatedAt) || Date.now();
+    const tokenOk = await validateRpgSyncToken(env, wallet, body.syncToken);
+    if (!tokenOk) {
+      const auth = await requireWalletSignature(
+        "td-rpg-save",
+        wallet,
+        body,
+        `updatedAt=${updatedAt}`,
+      );
+      if (auth) return auth;
+    }
+    const result = await saveRpg(env, wallet, body.heroSave, updatedAt);
+    return json({
+      ok: true,
+      saved: result.saved,
+      heroUpdatedAt: result.cloud.updatedAt,
+      heroSave: result.cloud.hero,
+    });
   }
 
   if (path[1] === "shop-buy" && request.method === "POST") {

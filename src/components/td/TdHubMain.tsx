@@ -126,7 +126,7 @@ export function TdHubMain({
                 type="button"
                 disabled={loading || points < refillCost}
                 onClick={onRefill}
-                className="rounded-md border border-sky-400/40 bg-sky-500/12 px-2 py-1 text-[10px] leading-snug text-sky-100 disabled:opacity-40"
+                className="inline-flex items-center rounded-lg border border-sky-300/50 bg-gradient-to-b from-sky-400/35 to-sky-600/45 px-2.5 py-1.5 text-[10px] font-semibold leading-snug text-sky-50 shadow-[0_3px_0_0_rgba(7,89,133,0.85),0_4px_10px_rgba(14,165,233,0.25)] transition active:translate-y-[2px] active:shadow-[0_1px_0_0_rgba(7,89,133,0.85)] enabled:hover:from-sky-400/45 enabled:hover:to-sky-600/55 disabled:translate-y-0 disabled:opacity-35 disabled:shadow-none"
               >
                 {t("refillStamina", { cost: refillCost })}
               </button>
@@ -142,7 +142,7 @@ export function TdHubMain({
                 type="button"
                 disabled={loading || points < goldExchangeCost}
                 onClick={onExchangeGold}
-                className="rounded-md border border-gold/40 bg-gold/10 px-2 py-1 text-[10px] leading-snug text-gold disabled:opacity-40"
+                className="inline-flex items-center rounded-lg border border-amber-300/55 bg-gradient-to-b from-amber-300/40 to-amber-600/50 px-2.5 py-1.5 text-[10px] font-semibold leading-snug text-amber-50 shadow-[0_3px_0_0_rgba(146,64,14,0.9),0_4px_10px_rgba(245,158,11,0.28)] transition active:translate-y-[2px] active:shadow-[0_1px_0_0_rgba(146,64,14,0.9)] enabled:hover:from-amber-300/50 enabled:hover:to-amber-600/60 disabled:translate-y-0 disabled:opacity-35 disabled:shadow-none"
               >
                 {t("exchangeGold", { cost: goldExchangeCost, gold: 100 })}
               </button>
