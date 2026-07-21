@@ -63,13 +63,14 @@ export const QUANT_POOLS: DexPool[] = [
   },
   {
     id: "eth-floki",
-    label: "FLOKI / USDT",
+    label: "FLOKI / WETH",
     chain: "ethereum",
     geckoNetwork: "eth",
     dex: "uniswap_v2",
-    poolAddress: "0x231d9e7181E8479A8B40930961e93E7ed798542C",
+    // Uniswap V2 FLOKI/WETH（旧地址误用了 BSC 池）
+    poolAddress: "0xca7c2771D248dCBe09EABE0CE57A62e18dA178c0",
     baseSymbol: "FLOKI",
-    quoteSymbol: "USDT",
+    quoteSymbol: "WETH",
   },
   {
     id: "eth-token",

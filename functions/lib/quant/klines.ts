@@ -21,32 +21,44 @@ async function sleep(ms: number) {
   await new Promise((r) => setTimeout(r, ms));
 }
 
+function parseOhlcvList(
+  list: [number, number, number, number, number, number][],
+): Kline[] {
+  return list
+    .map((row) => ({
+      time: row[0]! * 1000,
+      open: row[1]!,
+      high: row[2]!,
+      low: row[3]!,
+      close: row[4]!,
+      volume: row[5]!,
+    }))
+    .sort((a, b) => a.time - b.time);
+}
+
 /** GeckoTerminal：指定链上 DEX 池 OHLCV（eth / bsc） */
-async function fetchGeckoKlines(pool: DexPool, limit: number): Promise<Kline[]> {
+async function fetchGeckoKlines(pool: DexPool, limit: number): Promise<{ bars: Kline[]; status: number }> {
   const url = `https://api.geckoterminal.com/api/v2/networks/${pool.geckoNetwork}/pools/${pool.poolAddress}/ohlcv/hour?aggregate=1&limit=${limit}`;
-  for (let attempt = 0; attempt < 4; attempt++) {
-    const res = await fetch(url, { headers: { "User-Agent": UA } });
-    if (res.status === 429) {
-      await sleep(2000 * (attempt + 1));
-      continue;
+  let lastStatus = 0;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      const res = await fetch(url, { headers: { "User-Agent": UA } });
+      lastStatus = res.status;
+      if (res.status === 429) {
+        await sleep(2500 * (attempt + 1));
+        continue;
+      }
+      if (!res.ok) return { bars: [], status: res.status };
+      const json = (await res.json()) as {
+        data?: { attributes?: { ohlcv_list?: [number, number, number, number, number, number][] } };
+      };
+      const list = json.data?.attributes?.ohlcv_list ?? [];
+      return { bars: parseOhlcvList(list), status: res.status };
+    } catch {
+      await sleep(1000 * (attempt + 1));
     }
-    if (!res.ok) return [];
-    const json = (await res.json()) as {
-      data?: { attributes?: { ohlcv_list?: [number, number, number, number, number, number][] } };
-    };
-    const list = json.data?.attributes?.ohlcv_list ?? [];
-    return list
-      .map((row) => ({
-        time: row[0]! * 1000,
-        open: row[1]!,
-        high: row[2]!,
-        low: row[3]!,
-        close: row[4]!,
-        volume: row[5]!,
-      }))
-      .sort((a, b) => a.time - b.time);
   }
-  return [];
+  return { bars: [], status: lastStatus || 429 };
 }
 
 async function fetchDexScreenerPrice(pool: DexPool): Promise<number | null> {
@@ -64,11 +76,17 @@ async function fetchDexScreenerPrice(pool: DexPool): Promise<number | null> {
 }
 
 export async function fetchPoolKlines(pool: DexPool, limit = 80): Promise<Kline[]> {
-  const gecko = await fetchGeckoKlines(pool, limit);
-  if (gecko.length >= MIN_KLINE_BARS) return gecko;
-  if (gecko.length > 0) return gecko;
+  const { bars, status } = await fetchGeckoKlines(pool, limit);
+  if (bars.length >= MIN_KLINE_BARS) return bars;
+  if (bars.length > 0) return bars;
 
   const chainLabel = pool.chain === "bsc" ? "BSC" : "Ethereum";
+  if (status === 404) {
+    throw new Error(`链上池无效(${pool.baseSymbol}·${chainLabel})，请换 WETH/WBTC 等主流池`);
+  }
+  if (status === 429) {
+    throw new Error(`链上K线限流(${pool.baseSymbol}·${chainLabel})，请稍后重试`);
+  }
   throw new Error(`链上K线不可用(${pool.baseSymbol}·${chainLabel})，请稍后重试`);
 }
 
@@ -76,8 +94,8 @@ export async function fetchPoolPrice(pool: DexPool): Promise<number> {
   const spot = await fetchDexScreenerPrice(pool);
   if (spot != null) return spot;
 
-  const gecko = await fetchGeckoKlines(pool, 3);
-  const last = gecko[gecko.length - 1]?.close;
+  const { bars } = await fetchGeckoKlines(pool, 3);
+  const last = bars[bars.length - 1]?.close;
   if (last && last > 0) return last;
 
   const chainLabel = pool.chain === "bsc" ? "BSC" : "Ethereum";
@@ -85,7 +103,7 @@ export async function fetchPoolPrice(pool: DexPool): Promise<number> {
 }
 
 export function klineCacheKey(poolId: string) {
-  return `quant:klines:v4:${poolId}`;
+  return `quant:klines:v5:${poolId}`;
 }
 
 export const KLINE_CACHE_MS = 4 * 60 * 1000;

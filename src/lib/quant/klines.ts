@@ -61,7 +61,14 @@ export async function fetchPoolKlines(
   const fetchLimit = interval === "4h" ? Math.min(limit * 4, 400) : limit;
   const geckoUrl = `https://api.geckoterminal.com/api/v2/networks/${pool.geckoNetwork}/pools/${pool.poolAddress}/ohlcv/${tf}?aggregate=1&limit=${fetchLimit}`;
 
-  const geckoRes = await fetch(geckoUrl, { headers: { "User-Agent": UA } });
+  let geckoRes: Response | null = null;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    geckoRes = await fetch(geckoUrl, { headers: { "User-Agent": UA } });
+    if (geckoRes.status !== 429) break;
+    await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+  }
+  if (!geckoRes) throw new Error("链上 K 线请求失败");
+
   if (geckoRes.ok) {
     const json = (await geckoRes.json()) as {
       data?: { attributes?: { ohlcv_list?: [number, number, number, number, number, number][] } };
