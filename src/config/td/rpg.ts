@@ -20,7 +20,16 @@ import {
   type ProtagonistId,
 } from "@/config/td/protagonists";
 import { RUN_MAX_ZONE, SCENES_PER_MAP } from "@/config/td/zones";
-import { PET_CATALOG, getPetDef, petAtkFromDef } from "@/config/td/pet-catalog";
+import {
+  PET_CATALOG,
+  PET_SUMMON_ORDER,
+  defaultBattleParty,
+  emptyNeidan,
+  getPetDef,
+  petAtkFromDef,
+  type NeidanSlot,
+  type PetId,
+} from "@/config/td/pet-catalog";
 
 export type EquipSlot =
   | "weapon"
@@ -30,9 +39,10 @@ export type EquipSlot =
   | "ring"
   | "bracelet";
 
-export type CompanionKind = "群" | "粉" | "编" | "导" | "盾" | "医" | "灵" | "王";
+/** 宠物 ID（与 pet-catalog 同步） */
+export type CompanionKind = PetId;
 
-export const COMPANION_KINDS: CompanionKind[] = ["群", "粉", "编", "导", "盾", "医", "灵", "王"];
+export const COMPANION_KINDS: CompanionKind[] = [...PET_SUMMON_ORDER];
 
 export const EQUIP_SLOTS: EquipSlot[] = [
   "weapon",
@@ -72,10 +82,25 @@ export const COMPANION_AUTO_UNLOCK_LEVEL: Partial<Record<CompanionKind, number>>
   ) as Partial<Record<CompanionKind, number>>;
 
 export const MAX_HERO_LEVEL = MAX_HERO_LEVEL_BATCH1;
-export const MAX_COMPANION_LEVEL = 5;
+/** @deprecated 用伙伴独立等级上限 = 主角等级；保留常量给旧 UI */
+export const MAX_COMPANION_LEVEL = MAX_HERO_LEVEL_BATCH1;
 
 export function companionLevelCost(level: number): number {
-  return 10 + level * 6;
+  return 8 + level * 5;
+}
+
+function emptyCompanionRecord<T>(value: T): Record<CompanionKind, T> {
+  return Object.fromEntries(COMPANION_KINDS.map((k) => [k, value])) as Record<
+    CompanionKind,
+    T
+  >;
+}
+
+function emptyNeidanMap(): Record<CompanionKind, Record<NeidanSlot, number>> {
+  return Object.fromEntries(COMPANION_KINDS.map((k) => [k, emptyNeidan()])) as Record<
+    CompanionKind,
+    Record<NeidanSlot, number>
+  >;
 }
 
 export interface EquipBonus {
@@ -106,8 +131,15 @@ export interface HeroSave {
   inventory: string[];
   /** 强化石、洗练符等特殊材料 */
   materials: Record<string, number>;
+  /** 伙伴独立等级（上限 = 主角等级） */
   companionLevel: Record<CompanionKind, number>;
   companionUnlocked: Record<CompanionKind, boolean>;
+  /** 手动上阵 4 格；null = 空位 */
+  battleParty: (CompanionKind | null)[];
+  /** 修炼等级 0–20 */
+  companionCultivate: Record<CompanionKind, number>;
+  /** 内丹六格等级 */
+  companionNeidan: Record<CompanionKind, Record<NeidanSlot, number>>;
   /** 累计击杀数（怪物名 → 数量） */
   questKills: Record<string, number>;
   /** 已领取奖励的任务 id */
@@ -169,17 +201,11 @@ export function defaultHeroSave(): HeroSave {
     equipped: defaultEquipped(),
     inventory: [],
     materials: {},
-    companionLevel: { 群: 1, 粉: 1, 编: 1, 导: 1, 盾: 1, 医: 1, 灵: 1, 王: 1 },
-    companionUnlocked: {
-      群: false,
-      粉: false,
-      编: false,
-      导: false,
-      盾: false,
-      医: false,
-      灵: false,
-      王: false,
-    },
+    companionLevel: emptyCompanionRecord(1),
+    companionUnlocked: emptyCompanionRecord(false),
+    battleParty: defaultBattleParty(),
+    companionCultivate: emptyCompanionRecord(0),
+    companionNeidan: emptyNeidanMap(),
     questKills: {},
     questsClaimed: [],
   };
@@ -227,22 +253,80 @@ export function companionAtk(kind: CompanionKind, level: number): number {
   return Math.floor(4 + level * 2);
 }
 
-/** 等级达标时自动解锁免费助手 */
+/** 补齐存档里缺失的宠物字段（扩表后兼容旧档） */
+export function ensureCompanionMaps(save: HeroSave): HeroSave {
+  const companionLevel = { ...emptyCompanionRecord(1), ...save.companionLevel };
+  const companionUnlocked = {
+    ...emptyCompanionRecord(false),
+    ...save.companionUnlocked,
+  };
+  const companionCultivate = {
+    ...emptyCompanionRecord(0),
+    ...save.companionCultivate,
+  };
+  const companionNeidan = { ...emptyNeidanMap() };
+  for (const k of COMPANION_KINDS) {
+    companionNeidan[k] = {
+      ...emptyNeidan(),
+      ...(save.companionNeidan?.[k] ?? {}),
+    };
+  }
+  let battleParty = Array.isArray(save.battleParty)
+    ? [...save.battleParty]
+    : defaultBattleParty();
+  while (battleParty.length < 4) battleParty.push(null);
+  battleParty = battleParty.slice(0, 4).map((id) => {
+    if (!id || !COMPANION_KINDS.includes(id)) return null;
+    return id;
+  });
+  return {
+    ...save,
+    companionLevel,
+    companionUnlocked,
+    companionCultivate,
+    companionNeidan,
+    battleParty,
+  };
+}
+
+/** 等级达标时自动解锁免费助手，并自动填满空上阵位 */
 export function syncCompanionUnlocks(save: HeroSave): HeroSave {
-  let next = save;
+  let next = ensureCompanionMaps(save);
   for (const [kind, minLv] of Object.entries(COMPANION_AUTO_UNLOCK_LEVEL) as [
     CompanionKind,
     number,
   ][]) {
-    if (save.level < minLv || save.companionUnlocked[kind]) continue;
+    if (next.level < minLv || next.companionUnlocked[kind]) continue;
     next = {
       ...next,
       companionUnlocked: { ...next.companionUnlocked, [kind]: true },
       companionLevel: {
         ...next.companionLevel,
-        [kind]: Math.max(1, next.companionLevel[kind]),
+        [kind]: Math.max(1, next.companionLevel[kind] ?? 1),
       },
     };
+  }
+  // 独立等级不超过主角
+  const cappedLevels = { ...next.companionLevel };
+  for (const k of COMPANION_KINDS) {
+    cappedLevels[k] = Math.min(
+      Math.max(1, cappedLevels[k] ?? 1),
+      Math.max(1, next.level),
+    );
+  }
+  next = { ...next, companionLevel: cappedLevels };
+
+  // 空阵容时自动塞已解锁宠物（首次）
+  const hasAny = next.battleParty.some((x) => x != null);
+  if (!hasAny) {
+    const party = defaultBattleParty();
+    let i = 0;
+    for (const k of PET_SUMMON_ORDER) {
+      if (i >= 4) break;
+      if (!next.companionUnlocked[k]) continue;
+      party[i++] = k;
+    }
+    next = { ...next, battleParty: party };
   }
   return next;
 }

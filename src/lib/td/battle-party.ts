@@ -3,9 +3,14 @@ import {
   allyName,
   maxAllySlots,
 } from "@/config/td/battle-squads";
-import { PET_SUMMON_ORDER } from "@/config/td/pet-catalog";
 import {
-  companionAtk,
+  MAX_BATTLE_SLOTS,
+  PET_SUMMON_ORDER,
+  calcPetCombatStats,
+  getPetDef,
+} from "@/config/td/pet-catalog";
+import {
+  ensureCompanionMaps,
   heroCombatStats,
   type CompanionKind,
   type HeroSave,
@@ -24,25 +29,69 @@ export type BattleAlly = {
   isHero: boolean;
 };
 
+/** 手动上阵优先；空阵容时回退自动填充已解锁 */
 export function alliesInBattle(save: HeroSave): CompanionKind[] {
-  const slots = maxAllySlots(save.level);
+  const s = ensureCompanionMaps(save);
+  const slots = maxAllySlots(s.level);
   const out: CompanionKind[] = [];
+
+  for (const id of s.battleParty) {
+    if (out.length >= slots) break;
+    if (!id) continue;
+    if (!s.companionUnlocked[id]) continue;
+    if (s.level < ALLY_DEPLOY_LEVEL[id]) continue;
+    if (out.includes(id)) continue;
+    out.push(id);
+  }
+
+  if (out.length > 0) return out;
+
   for (const k of PET_SUMMON_ORDER) {
     if (out.length >= slots) break;
-    if (save.level < ALLY_DEPLOY_LEVEL[k]) continue;
-    if (!save.companionUnlocked[k]) continue;
+    if (!s.companionUnlocked[k]) continue;
+    if (s.level < ALLY_DEPLOY_LEVEL[k]) continue;
     out.push(k);
   }
   return out;
 }
 
-/** 构建上场队伍（主角 + 已登场助手） */
+/** 把宠物放入上阵格（可替换；已在阵中则互换） */
+export function setBattleSlot(
+  save: HeroSave,
+  slotIndex: number,
+  petId: CompanionKind | null,
+): HeroSave | null {
+  const s = ensureCompanionMaps(save);
+  if (slotIndex < 0 || slotIndex >= MAX_BATTLE_SLOTS) return null;
+  if (petId != null) {
+    if (!s.companionUnlocked[petId]) return null;
+    if (s.level < ALLY_DEPLOY_LEVEL[petId]) return null;
+  }
+  const party = [...s.battleParty] as (CompanionKind | null)[];
+  while (party.length < MAX_BATTLE_SLOTS) party.push(null);
+
+  if (petId != null) {
+    const existing = party.findIndex((x) => x === petId);
+    if (existing >= 0 && existing !== slotIndex) {
+      party[existing] = party[slotIndex];
+    }
+  }
+  party[slotIndex] = petId;
+  return { ...s, battleParty: party.slice(0, MAX_BATTLE_SLOTS) };
+}
+
+export function clearBattleSlot(save: HeroSave, slotIndex: number): HeroSave | null {
+  return setBattleSlot(save, slotIndex, null);
+}
+
+/** 构建上场队伍（主角 + 已登场宠物） */
 export function buildBattleParty(
   save: HeroSave,
   locale: string,
   buffs: string[],
 ): BattleAlly[] {
-  const combat = heroCombatStats(save);
+  const s = ensureCompanionMaps(save);
+  const combat = heroCombatStats(s);
   let heroAtk = combat.atk;
   let heroHp = combat.maxHp;
   if (buffs.includes("pack")) {
@@ -54,7 +103,7 @@ export function buildBattleParty(
     {
       id: "hero",
       kind: "hero",
-      name: "", // filled by caller
+      name: "",
       hp: heroHp,
       maxHp: heroHp,
       atk: heroAtk,
@@ -65,20 +114,32 @@ export function buildBattleParty(
     },
   ];
 
-  for (const k of alliesInBattle(save)) {
-    const lv = save.companionLevel[k];
-    const atk = companionAtk(k, lv);
-    const hp = Math.floor(55 + lv * 22 + save.level * 3);
+  for (const k of alliesInBattle(s)) {
+    const def = getPetDef(k);
+    const lv = Math.min(s.companionLevel[k] ?? 1, s.level);
+    const cultivate = s.companionCultivate?.[k] ?? 0;
+    const neidan = s.companionNeidan?.[k] ?? {};
+    const stats = def
+      ? calcPetCombatStats(def, lv, cultivate, neidan)
+      : {
+          atk: 4 + lv * 2,
+          hp: 40 + lv * 10,
+          def: 2 + lv,
+          mag: 2,
+          crit: 2,
+          hit: 5,
+        };
+
     party.push({
       id: `ally_${k}`,
       kind: k,
       name: allyName(k, locale),
-      hp,
-      maxHp: hp,
-      atk,
-      mag: Math.floor(atk * 0.4),
-      def: Math.floor(4 + lv * 2),
-      dodge: 3 + lv,
+      hp: stats.hp,
+      maxHp: stats.hp,
+      atk: stats.atk,
+      mag: stats.mag,
+      def: stats.def,
+      dodge: 3 + lv + Math.floor(stats.hit / 4),
       isHero: false,
     });
   }
@@ -88,7 +149,12 @@ export function buildBattleParty(
 export function partyPowerScore(party: BattleAlly[]): number {
   return party.reduce(
     (s, u) =>
-      s + u.atk + u.mag * 0.8 + u.maxHp * 0.08 + u.def * 0.5 + (u.isHero ? 0 : u.atk * 0.2),
+      s +
+      u.atk +
+      u.mag * 0.8 +
+      u.maxHp * 0.08 +
+      u.def * 0.5 +
+      (u.isHero ? 0 : u.atk * 0.2),
     0,
   );
 }

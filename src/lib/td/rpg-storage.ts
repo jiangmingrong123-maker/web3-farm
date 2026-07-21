@@ -5,9 +5,9 @@ import {
   allocateStatPoint,
   allocateStatPointsBatch,
   advanceWorldProgress,
+  ensureCompanionMaps,
   COMPANION_KINDS,
   COMPANION_UNLOCK_GOLD,
-  companionLevelCost,
   defaultEquipped,
   type CompanionKind,
   type EquipSlot,
@@ -22,7 +22,16 @@ import {
 } from "@/config/td/equipment-catalog";
 import { expForLevel, levelFromExp } from "@/config/td/hero-levels";
 import { equipRecycleGold } from "@/config/td/economy";
-import { petSummonLevel } from "@/config/td/pet-catalog";
+import {
+  MAX_CULTIVATE_LEVEL,
+  MAX_NEIDAN_LEVEL,
+  emptyNeidan,
+  petCultivateGold,
+  petLevelUpGold,
+  petNeidanGold,
+  petSummonLevel,
+  type NeidanSlot,
+} from "@/config/td/pet-catalog";
 import { canHeroWearItem, sanitizeEquipped } from "@/lib/td/equip-rules";
 import { applyMonsterKills } from "@/lib/td/quest-progress";
 import { scoreEquipItemId } from "@/lib/td/equip-score";
@@ -32,6 +41,7 @@ import {
   type ProtagonistId,
 } from "@/config/td/protagonists";
 import { RUN_MAX_ZONE, SCENES_PER_MAP } from "@/config/td/zones";
+import { setBattleSlot } from "@/lib/td/battle-party";
 
 const VALID_PROTAGONISTS: ProtagonistId[] = [
   "goku",
@@ -43,8 +53,8 @@ const VALID_PROTAGONISTS: ProtagonistId[] = [
 
 const KEY = "td_rpg_save";
 
-/** 存档版本：4 = 任务杀怪计数 */
-export const HERO_SAVE_VERSION = 4;
+/** 存档版本：5 = 宠物独立等级/上阵/修炼/内丹 */
+export const HERO_SAVE_VERSION = 5;
 
 export function itemPower(itemId: string): number {
   return scoreEquipItemId(itemId);
@@ -159,30 +169,43 @@ function migrateSave(parsed: Record<string, unknown>): HeroSave {
   }
 
   return sanitizeEquipped(
-    syncHeroLevel({
-      protagonistId: VALID_PROTAGONISTS.includes(protagonistId)
-        ? protagonistId
-        : DEFAULT_PROTAGONIST,
-      level,
-      exp,
-      stats,
-      statPoints,
-      worldMap,
-      worldScene,
-      equipped,
-      inventory,
-      materials,
-      companionLevel: {
-        ...base.companionLevel,
-        ...(parsed.companionLevel as HeroSave["companionLevel"] | undefined),
-      },
-    companionUnlocked: {
-      ...base.companionUnlocked,
-      ...(parsed.companionUnlocked as HeroSave["companionUnlocked"] | undefined),
-    },
-    questKills,
-    questsClaimed,
-    }),
+    ensureCompanionMaps(
+      syncHeroLevel({
+        protagonistId: VALID_PROTAGONISTS.includes(protagonistId)
+          ? protagonistId
+          : DEFAULT_PROTAGONIST,
+        level,
+        exp,
+        stats,
+        statPoints,
+        worldMap,
+        worldScene,
+        equipped,
+        inventory,
+        materials,
+        companionLevel: {
+          ...base.companionLevel,
+          ...(parsed.companionLevel as HeroSave["companionLevel"] | undefined),
+        },
+        companionUnlocked: {
+          ...base.companionUnlocked,
+          ...(parsed.companionUnlocked as HeroSave["companionUnlocked"] | undefined),
+        },
+        battleParty: Array.isArray(parsed.battleParty)
+          ? (parsed.battleParty as HeroSave["battleParty"])
+          : base.battleParty,
+        companionCultivate: {
+          ...base.companionCultivate,
+          ...(parsed.companionCultivate as HeroSave["companionCultivate"] | undefined),
+        },
+        companionNeidan: {
+          ...base.companionNeidan,
+          ...(parsed.companionNeidan as HeroSave["companionNeidan"] | undefined),
+        },
+        questKills,
+        questsClaimed,
+      }),
+    ),
   );
 }
 
@@ -266,6 +289,9 @@ export function saveHeroSave(wallet: string, save: HeroSave, updatedAt = Date.no
 export type UpgradeKind =
   | { type: "companion"; kind: CompanionKind }
   | { type: "unlock"; kind: CompanionKind }
+  | { type: "cultivate"; kind: CompanionKind }
+  | { type: "neidan"; kind: CompanionKind; slot: NeidanSlot }
+  | { type: "battleSlot"; slotIndex: number; petId: CompanionKind | null }
   | { type: "equip"; slot: EquipSlot; itemId: string }
   | { type: "protagonist"; id: ProtagonistId }
   | { type: "stat"; key: StatKey }
@@ -273,71 +299,105 @@ export type UpgradeKind =
   | { type: "discard"; itemId: string };
 
 export function upgradeCost(save: HeroSave, kind: UpgradeKind): number | null {
+  const s = ensureCompanionMaps(save);
   if (kind.type === "protagonist") return null;
   if (kind.type === "stat" || kind.type === "statBatch") return null;
   if (kind.type === "discard") return 0;
+  if (kind.type === "battleSlot") return 0;
   if (kind.type === "companion") {
-    if (!save.companionUnlocked[kind.kind]) return null;
-    const lv = save.companionLevel[kind.kind];
-    if (lv >= 5) return null;
-    return companionLevelCost(lv);
+    if (!s.companionUnlocked[kind.kind]) return null;
+    const lv = s.companionLevel[kind.kind] ?? 1;
+    if (lv >= s.level) return null;
+    return petLevelUpGold(lv);
+  }
+  if (kind.type === "cultivate") {
+    if (!s.companionUnlocked[kind.kind]) return null;
+    const c = s.companionCultivate[kind.kind] ?? 0;
+    if (c >= MAX_CULTIVATE_LEVEL) return null;
+    return petCultivateGold(c);
+  }
+  if (kind.type === "neidan") {
+    if (!s.companionUnlocked[kind.kind]) return null;
+    const lv = s.companionNeidan[kind.kind]?.[kind.slot] ?? 0;
+    if (lv >= MAX_NEIDAN_LEVEL) return null;
+    return petNeidanGold(lv);
   }
   if (kind.type === "unlock") {
-    if (save.companionUnlocked[kind.kind]) return null;
-    if (save.level < petSummonLevel(kind.kind)) return null;
+    if (s.companionUnlocked[kind.kind]) return null;
+    if (s.level < petSummonLevel(kind.kind)) return null;
     const cost = COMPANION_UNLOCK_GOLD[kind.kind];
     if (cost === 0) return null;
     return cost;
   }
   if (kind.type === "equip") {
-    if (!save.inventory.includes(kind.itemId)) return null;
-    if (save.equipped[kind.slot] === kind.itemId) return null;
+    if (!s.inventory.includes(kind.itemId)) return null;
+    if (s.equipped[kind.slot] === kind.itemId) return null;
     const item = getEquipItem(kind.itemId);
     if (!item || item.slot !== kind.slot) return null;
-    if (!canHeroWearItem(save, kind.itemId)) return null;
+    if (!canHeroWearItem(s, kind.itemId)) return null;
     return 0;
   }
   return null;
 }
 
 export function applyUpgrade(save: HeroSave, kind: UpgradeKind): HeroSave | null {
+  const s = ensureCompanionMaps(save);
   if (kind.type === "stat") {
-    return allocateStatPoint(save, kind.key);
+    return allocateStatPoint(s, kind.key);
   }
   if (kind.type === "statBatch") {
-    return allocateStatPointsBatch(save, kind.deltas);
+    return allocateStatPointsBatch(s, kind.deltas);
   }
   if (kind.type === "protagonist") {
-    if (save.protagonistId === kind.id) return null;
-    return resetStatsForProtagonist(save, kind.id);
+    if (s.protagonistId === kind.id) return null;
+    return resetStatsForProtagonist(s, kind.id);
+  }
+  if (kind.type === "battleSlot") {
+    return setBattleSlot(s, kind.slotIndex, kind.petId);
   }
   if (kind.type === "equip") {
     const item = getEquipItem(kind.itemId);
     if (!item || item.slot !== kind.slot) return null;
-    if (!save.inventory.includes(kind.itemId)) return null;
-    if (!canHeroWearItem(save, kind.itemId)) return null;
-    return { ...save, equipped: { ...save.equipped, [kind.slot]: kind.itemId } };
+    if (!s.inventory.includes(kind.itemId)) return null;
+    if (!canHeroWearItem(s, kind.itemId)) return null;
+    return { ...s, equipped: { ...s.equipped, [kind.slot]: kind.itemId } };
   }
   if (kind.type === "discard") {
-    if (!save.inventory.includes(kind.itemId)) return null;
+    if (!s.inventory.includes(kind.itemId)) return null;
     if (Object.values(STARTER_EQUIP_IDS).includes(kind.itemId)) return null;
-    for (const slot of Object.keys(save.equipped) as EquipSlot[]) {
-      if (save.equipped[slot] === kind.itemId) return null;
+    for (const slot of Object.keys(s.equipped) as EquipSlot[]) {
+      if (s.equipped[slot] === kind.itemId) return null;
     }
     const item = getEquipItem(kind.itemId);
     if (!item) return null;
     return {
-      ...save,
-      inventory: save.inventory.filter((id) => id !== kind.itemId),
+      ...s,
+      inventory: s.inventory.filter((id) => id !== kind.itemId),
     };
   }
-  if (upgradeCost(save, kind) == null) return null;
-  const next = structuredClone(save);
+  if (upgradeCost(s, kind) == null) return null;
+  const next = structuredClone(s);
   if (kind.type === "companion") {
-    next.companionLevel[kind.kind] += 1;
+    next.companionLevel[kind.kind] = (next.companionLevel[kind.kind] ?? 1) + 1;
+  } else if (kind.type === "cultivate") {
+    next.companionCultivate[kind.kind] =
+      (next.companionCultivate[kind.kind] ?? 0) + 1;
+  } else if (kind.type === "neidan") {
+    const cur = next.companionNeidan[kind.kind] ?? emptyNeidan();
+    next.companionNeidan[kind.kind] = {
+      ...emptyNeidan(),
+      ...cur,
+      [kind.slot]: (cur[kind.slot] ?? 0) + 1,
+    };
   } else if (kind.type === "unlock") {
     next.companionUnlocked[kind.kind] = true;
-    next.companionLevel[kind.kind] = 1;
+    next.companionLevel[kind.kind] = Math.max(1, next.companionLevel[kind.kind] ?? 1);
+    // 自动放入第一个空位
+    const empty = next.battleParty.findIndex((x) => x == null);
+    if (empty >= 0) {
+      const placed = setBattleSlot(next, empty, kind.kind);
+      if (placed) return placed;
+    }
   }
   return next;
 }

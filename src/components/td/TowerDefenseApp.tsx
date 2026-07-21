@@ -970,7 +970,8 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
       kind.type === "equip" ||
       kind.type === "stat" ||
       kind.type === "statBatch" ||
-      kind.type === "discard"
+      kind.type === "discard" ||
+      kind.type === "battleSlot"
     ) {
       if (kind.type === "discard") {
         const gold = discardInventoryGold(kind.itemId);
