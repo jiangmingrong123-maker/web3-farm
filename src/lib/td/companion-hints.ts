@@ -5,6 +5,7 @@ import {
   MAX_COMPANION_LEVEL,
   type HeroSave,
 } from "@/config/td/rpg";
+import { petSummonLevel } from "@/config/td/pet-catalog";
 import { alliesInBattle } from "@/lib/td/battle-party";
 import { upgradeCost } from "@/lib/td/rpg-storage";
 
@@ -16,7 +17,12 @@ export function companionHubFlags(save: HeroSave, gold: number) {
 
   for (const kind of COMPANION_KINDS) {
     const unlockGold = COMPANION_UNLOCK_GOLD[kind];
-    if (unlockGold > 0 && !save.companionUnlocked[kind] && gold >= unlockGold) {
+    if (
+      unlockGold > 0 &&
+      !save.companionUnlocked[kind] &&
+      save.level >= petSummonLevel(kind) &&
+      gold >= unlockGold
+    ) {
       companionUnlockable = true;
     }
     const cost = upgradeCost(save, { type: "companion", kind });

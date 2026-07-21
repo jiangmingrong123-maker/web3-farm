@@ -22,6 +22,7 @@ import {
 } from "@/config/td/equipment-catalog";
 import { expForLevel, levelFromExp } from "@/config/td/hero-levels";
 import { equipRecycleGold } from "@/config/td/economy";
+import { petSummonLevel } from "@/config/td/pet-catalog";
 import { canHeroWearItem, sanitizeEquipped } from "@/lib/td/equip-rules";
 import { applyMonsterKills } from "@/lib/td/quest-progress";
 import { scoreEquipItemId } from "@/lib/td/equip-score";
@@ -283,7 +284,10 @@ export function upgradeCost(save: HeroSave, kind: UpgradeKind): number | null {
   }
   if (kind.type === "unlock") {
     if (save.companionUnlocked[kind.kind]) return null;
-    return COMPANION_UNLOCK_GOLD[kind.kind];
+    if (save.level < petSummonLevel(kind.kind)) return null;
+    const cost = COMPANION_UNLOCK_GOLD[kind.kind];
+    if (cost === 0) return null;
+    return cost;
   }
   if (kind.type === "equip") {
     if (!save.inventory.includes(kind.itemId)) return null;

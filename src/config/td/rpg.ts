@@ -20,6 +20,7 @@ import {
   type ProtagonistId,
 } from "@/config/td/protagonists";
 import { RUN_MAX_ZONE, SCENES_PER_MAP } from "@/config/td/zones";
+import { PET_CATALOG, getPetDef, petAtkFromDef } from "@/config/td/pet-catalog";
 
 export type EquipSlot =
   | "weapon"
@@ -29,9 +30,9 @@ export type EquipSlot =
   | "ring"
   | "bracelet";
 
-export type CompanionKind = "群" | "粉" | "编" | "导";
+export type CompanionKind = "群" | "粉" | "编" | "导" | "盾" | "医" | "灵" | "王";
 
-export const COMPANION_KINDS: CompanionKind[] = ["群", "粉", "编", "导"];
+export const COMPANION_KINDS: CompanionKind[] = ["群", "粉", "编", "导", "盾", "医", "灵", "王"];
 
 export const EQUIP_SLOTS: EquipSlot[] = [
   "weapon",
@@ -60,18 +61,15 @@ export const EQUIP_NAMES_EN: Record<EquipSlot, string> = {
   bracelet: "Bracelet",
 };
 
-export const COMPANION_UNLOCK_GOLD: Record<CompanionKind, number> = {
-  群: 0,
-  粉: 0,
-  编: 60,
-  导: 90,
-};
+export const COMPANION_UNLOCK_GOLD: Record<CompanionKind, number> = Object.fromEntries(
+  PET_CATALOG.map((p) => [p.id, p.summonGold]),
+) as Record<CompanionKind, number>;
 
-/** 达到等级自动解锁（免费助手，无需金币） */
-export const COMPANION_AUTO_UNLOCK_LEVEL: Partial<Record<CompanionKind, number>> = {
-  群: 5,
-  粉: 12,
-};
+/** 达到等级自动解锁（免费宠物，无需金币召唤） */
+export const COMPANION_AUTO_UNLOCK_LEVEL: Partial<Record<CompanionKind, number>> =
+  Object.fromEntries(
+    PET_CATALOG.filter((p) => p.summonGold === 0).map((p) => [p.id, p.summonLevel]),
+  ) as Partial<Record<CompanionKind, number>>;
 
 export const MAX_HERO_LEVEL = MAX_HERO_LEVEL_BATCH1;
 export const MAX_COMPANION_LEVEL = 5;
@@ -171,8 +169,17 @@ export function defaultHeroSave(): HeroSave {
     equipped: defaultEquipped(),
     inventory: [],
     materials: {},
-    companionLevel: { 群: 1, 粉: 1, 编: 1, 导: 1 },
-    companionUnlocked: { 群: false, 粉: false, 编: false, 导: false },
+    companionLevel: { 群: 1, 粉: 1, 编: 1, 导: 1, 盾: 1, 医: 1, 灵: 1, 王: 1 },
+    companionUnlocked: {
+      群: false,
+      粉: false,
+      编: false,
+      导: false,
+      盾: false,
+      医: false,
+      灵: false,
+      王: false,
+    },
     questKills: {},
     questsClaimed: [],
   };
@@ -215,8 +222,9 @@ export function heroCombatStats(save: HeroSave): HeroStats {
 }
 
 export function companionAtk(kind: CompanionKind, level: number): number {
-  const base = { 群: 6, 粉: 5, 编: 4, 导: 8 }[kind];
-  return Math.floor(base + level * 2.2);
+  const def = getPetDef(kind);
+  if (def) return petAtkFromDef(def, level);
+  return Math.floor(4 + level * 2);
 }
 
 /** 等级达标时自动解锁免费助手 */

@@ -3,6 +3,7 @@ import {
   allyName,
   maxAllySlots,
 } from "@/config/td/battle-squads";
+import { PET_SUMMON_ORDER } from "@/config/td/pet-catalog";
 import {
   companionAtk,
   heroCombatStats,
@@ -25,12 +26,11 @@ export type BattleAlly = {
 
 export function alliesInBattle(save: HeroSave): CompanionKind[] {
   const slots = maxAllySlots(save.level);
-  const order: CompanionKind[] = ["群", "粉", "编", "导"];
   const out: CompanionKind[] = [];
-  for (const k of order) {
+  for (const k of PET_SUMMON_ORDER) {
     if (out.length >= slots) break;
     if (save.level < ALLY_DEPLOY_LEVEL[k]) continue;
-    if ((k === "编" || k === "导") && !save.companionUnlocked[k]) continue;
+    if (!save.companionUnlocked[k]) continue;
     out.push(k);
   }
   return out;
