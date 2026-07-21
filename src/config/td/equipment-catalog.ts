@@ -232,7 +232,7 @@ export function rollZoneLoot(
     if (zoneId > 1) return rollZoneLoot(zoneId - 1, heroLevel, opts);
     return null;
   }
-  const earlyBoost = zoneId <= 3 ? 1.6 : 1;
+  const earlyBoost = zoneId <= 3 ? 1.6 : zoneId <= 15 ? 1.5 : 1.15;
   const sweepBoost = opts?.sweep ? 2.2 : 1;
   const guaranteed = opts?.guaranteed ?? false;
 
@@ -245,8 +245,8 @@ export function rollZoneLoot(
     const rate = (item.dropRate ?? 0) * earlyBoost * sweepBoost;
     if (Math.random() * 100 < Math.min(95, rate)) return item;
   }
-  // 保底：约 35% 再给一件
-  if (Math.random() < (opts?.sweep ? 0.55 : 0.35)) {
+  // 保底：约 35% 再给一件（扫图更高）
+  if (Math.random() < (opts?.sweep ? 0.58 : 0.42)) {
     const sorted = [...pool].sort((a, b) => b.level - a.level);
     return sorted[Math.floor(Math.random() * sorted.length)] ?? null;
   }

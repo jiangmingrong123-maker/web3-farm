@@ -119,7 +119,7 @@ export function TdRpgHub({
   const panelContent = (() => {
     switch (panel) {
       case "stats":
-        return <TdStatAllocator save={save} locale={locale} onUpgrade={onUpgrade} />;
+        return <TdStatAllocator save={save} locale={locale} gold={gold} onUpgrade={onUpgrade} />;
       case "equip":
         return <TdEquipPanel save={save} locale={locale} onEquip={onUpgrade} />;
       case "backpack":

@@ -99,6 +99,14 @@ export async function ensureRpgSyncToken(
   return auth.syncToken;
 }
 
+/** 优先用本机缓存的 7 天 play session，避免每次开战都弹签名 */
+export async function resolvePlaySessionToken(
+  wallet: string,
+  sign: TdSignFn,
+): Promise<string | null> {
+  return loadSyncToken(wallet)?.syncToken ?? ensureRpgSyncToken(wallet, sign);
+}
+
 export async function uploadHeroToCloud(
   wallet: string,
   save: HeroSave,

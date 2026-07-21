@@ -60,6 +60,7 @@ export function TdHubActionPanel({
           </p>
         )}
         <p className="text-[10px] leading-relaxed text-white/45">{t("rulesHint")}</p>
+        <p className="text-[10px] leading-relaxed text-sky-200/60">{t("playSessionHint")}</p>
       </div>
     </div>
   );

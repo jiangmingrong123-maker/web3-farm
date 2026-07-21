@@ -1,6 +1,6 @@
 /** 怪物区域 · 第一批 1–20（合规名称 · 来自设计表） */
 
-import { earlyMapExpMult } from "@/config/td/progression-feedback";
+import { mapExpMult } from "@/config/td/progression-feedback";
 
 export type ZoneDef = {
   id: number;
@@ -31,7 +31,7 @@ export function sceneExpFromZone(
       : Math.max(4, base);
   return Math.max(
     1,
-    Math.floor(raw * SCENE_EXP_MULTIPLIER * earlyMapExpMult(mapId)),
+    Math.floor(raw * SCENE_EXP_MULTIPLIER * mapExpMult(mapId)),
   );
 }
 

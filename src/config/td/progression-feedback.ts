@@ -83,10 +83,33 @@ export function earlyMapExpMult(mapId: number): number {
   return DEFAULT_TUNING_PASS.earlyExpBonus;
 }
 
+/** 地图 6–15 额外经验（填表反馈：中期太磨） */
+export const MID_GAME_MAP_MAX = 15;
+export const MID_GAME_EXP_BONUS = 1.38;
+
+/** 地图 16+ 略增，避免后期又卡 */
+export const LATE_GAME_EXP_BONUS = 1.18;
+
+export function mapExpMult(mapId: number): number {
+  let m = earlyMapExpMult(mapId);
+  if (mapId >= 6 && mapId <= MID_GAME_MAP_MAX) m *= MID_GAME_EXP_BONUS;
+  else if (mapId > MID_GAME_MAP_MAX) m *= LATE_GAME_EXP_BONUS;
+  return m;
+}
+
+/** 普通关掉落概率（BOSS 仍必掉） */
+export function normalSceneLootChance(mapId: number): number {
+  if (mapId <= 5) return 0.22;
+  if (mapId <= MID_GAME_MAP_MAX) return 0.2;
+  return 0.12;
+}
+
 export type HubProgressTipKind =
   | "underleveled"
   | "allocateStats"
   | "checkEquip"
+  | "unlockCompanion"
+  | "upgradeCompanion"
   | "pushFight"
   | "trySweep"
   | "buyStamina";
@@ -100,9 +123,15 @@ export function pickHubProgressTip(input: {
   stamina: number;
   mapSweepUnlocked: boolean;
   clearedMaps: number;
+  alliesInBattle: number;
+  maxAllySlots: number;
+  companionUpgradeable: boolean;
+  companionUnlockable: boolean;
 }): HubProgressTipKind {
   if (input.stamina <= 0) return "buyStamina";
   if (input.statPoints > 0) return "allocateStats";
+  if (input.companionUnlockable) return "unlockCompanion";
+  if (input.companionUpgradeable) return "upgradeCompanion";
   if (
     input.recommendLevel != null &&
     input.heroLevel + 2 < input.recommendLevel

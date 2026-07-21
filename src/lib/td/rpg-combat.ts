@@ -17,6 +17,7 @@ import {
   SCENES_PER_MAP,
   zoneName,
 } from "@/config/td/zones";
+import { normalSceneLootChance } from "@/config/td/progression-feedback";
 import {
   buildBattleParty,
   livingParty,
@@ -273,7 +274,8 @@ export function simulateSceneBattle(
   if (sceneWon && zone) {
     const expGain = sceneExp(zone.exp, mapId, scene);
     runExp = expGain;
-    const rollLoot = isBoss || (mapId <= 5 && Math.random() < 0.22);
+    const rollLoot =
+      isBoss || Math.random() < normalSceneLootChance(mapId);
     if (rollLoot) {
       const loot = rollZoneLoot(mapId, save.level);
       if (loot) {

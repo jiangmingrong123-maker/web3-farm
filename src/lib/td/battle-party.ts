@@ -68,7 +68,7 @@ export function buildBattleParty(
   for (const k of alliesInBattle(save)) {
     const lv = save.companionLevel[k];
     const atk = companionAtk(k, lv);
-    const hp = Math.floor(40 + lv * 18 + save.level * 2);
+    const hp = Math.floor(55 + lv * 22 + save.level * 3);
     party.push({
       id: `ally_${k}`,
       kind: k,

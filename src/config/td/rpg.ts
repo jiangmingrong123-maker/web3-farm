@@ -63,8 +63,14 @@ export const EQUIP_NAMES_EN: Record<EquipSlot, string> = {
 export const COMPANION_UNLOCK_GOLD: Record<CompanionKind, number> = {
   群: 0,
   粉: 0,
-  编: 80,
-  导: 120,
+  编: 60,
+  导: 90,
+};
+
+/** 达到等级自动解锁（免费助手，无需金币） */
+export const COMPANION_AUTO_UNLOCK_LEVEL: Partial<Record<CompanionKind, number>> = {
+  群: 5,
+  粉: 12,
 };
 
 export const MAX_HERO_LEVEL = MAX_HERO_LEVEL_BATCH1;
@@ -209,23 +215,43 @@ export function heroCombatStats(save: HeroSave): HeroStats {
 }
 
 export function companionAtk(kind: CompanionKind, level: number): number {
-  const base = { 群: 4, 粉: 3, 编: 2, 导: 5 }[kind];
-  return Math.floor(base + level * 1.5);
+  const base = { 群: 6, 粉: 5, 编: 4, 导: 8 }[kind];
+  return Math.floor(base + level * 2.2);
+}
+
+/** 等级达标时自动解锁免费助手 */
+export function syncCompanionUnlocks(save: HeroSave): HeroSave {
+  let next = save;
+  for (const [kind, minLv] of Object.entries(COMPANION_AUTO_UNLOCK_LEVEL) as [
+    CompanionKind,
+    number,
+  ][]) {
+    if (save.level < minLv || save.companionUnlocked[kind]) continue;
+    next = {
+      ...next,
+      companionUnlocked: { ...next.companionUnlocked, [kind]: true },
+      companionLevel: {
+        ...next.companionLevel,
+        [kind]: Math.max(1, next.companionLevel[kind]),
+      },
+    };
+  }
+  return next;
 }
 
 /** 同步等级；升级时发放潜力点 */
 export function syncHeroLevel(save: HeroSave): HeroSave {
   const level = levelFromExp(save.exp);
   if (level <= save.level) {
-    if (level === save.level) return save;
-    return { ...save, level };
+    const synced = level === save.level ? save : { ...save, level };
+    return syncCompanionUnlocks(synced);
   }
   const gained = level - save.level;
-  return {
+  return syncCompanionUnlocks({
     ...save,
     level,
     statPoints: save.statPoints + gained * STAT_POINTS_PER_LEVEL,
-  };
+  });
 }
 
 /** 切换主角：重置三维并返还已分配潜力点 */

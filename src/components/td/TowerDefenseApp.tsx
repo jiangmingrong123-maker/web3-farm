@@ -42,6 +42,7 @@ import {
 } from "@/lib/td/rpg-storage";
 import {
   ensureRpgSyncToken,
+  loadSyncToken,
   mergeHeroWithCloud,
   queueHeroCloudUpload,
   toHeroCloudPayload,
@@ -769,8 +770,8 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
       return;
     }
     persistHero(preview.save, { upload: false });
-    const sessionToken = await ensureRpgSyncToken(address, sign);
-    const cleared = await fastClearStaminaApi(
+    let sessionToken = loadSyncToken(address)?.syncToken ?? null;
+    let cleared = await fastClearStaminaApi(
       address,
       sign,
       cost,
@@ -778,6 +779,19 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
       toHeroCloudPayload(preview.save, loadHeroUpdatedAt(walletKey) || Date.now()),
       sessionToken,
     );
+    if (!cleared) {
+      sessionToken = await ensureRpgSyncToken(address, sign);
+      if (sessionToken) {
+        cleared = await fastClearStaminaApi(
+          address,
+          sign,
+          cost,
+          preview.sceneWon,
+          toHeroCloudPayload(preview.save, loadHeroUpdatedAt(walletKey) || Date.now()),
+          sessionToken,
+        );
+      }
+    }
     setLoading(false);
     if (!cleared) {
       setError(t("startFailed"));
@@ -824,12 +838,14 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
     if (!address) return;
     setLoading(true);
     setError(null);
-    const res = await startTdRunApi(
-      address,
-      1,
-      sign,
-      await ensureRpgSyncToken(address, sign),
-    );
+    let sessionToken = loadSyncToken(address)?.syncToken ?? null;
+    let res = await startTdRunApi(address, 1, sign, sessionToken);
+    if (!res) {
+      sessionToken = await ensureRpgSyncToken(address, sign);
+      if (sessionToken) {
+        res = await startTdRunApi(address, 1, sign, sessionToken);
+      }
+    }
     setLoading(false);
     if (!res) {
       setError(t("startFailed"));
@@ -915,14 +931,26 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
       return;
     }
     persistHero(preview.save, { upload: false });
-    const sessionToken = await ensureRpgSyncToken(address, sign);
-    const spent = await mapSweepStaminaApi(
+    let sessionToken = loadSyncToken(address)?.syncToken ?? null;
+    let spent = await mapSweepStaminaApi(
       address,
       sign,
       runs,
       toHeroCloudPayload(preview.save, loadHeroUpdatedAt(walletKey) || Date.now()),
       sessionToken,
     );
+    if (!spent) {
+      sessionToken = await ensureRpgSyncToken(address, sign);
+      if (sessionToken) {
+        spent = await mapSweepStaminaApi(
+          address,
+          sign,
+          runs,
+          toHeroCloudPayload(preview.save, loadHeroUpdatedAt(walletKey) || Date.now()),
+          sessionToken,
+        );
+      }
+    }
     setSweepLoading(false);
     if (!spent) {
       setError(t("mapSweepFailed"));

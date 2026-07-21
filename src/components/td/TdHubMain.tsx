@@ -4,6 +4,9 @@ import { useTranslations } from "next-intl";
 import { TdQuestTracker } from "@/components/td/TdQuestTracker";
 import { ProtagonistAvatar } from "@/components/td/TdHeroPicker";
 import { pickHubProgressTip } from "@/config/td/progression-feedback";
+import { companionHubFlags } from "@/lib/td/companion-hints";
+import { alliesInBattle } from "@/lib/td/battle-party";
+import { maxAllySlots } from "@/config/td/battle-squads";
 import { STAMINA_MAX } from "@/config/td/economy";
 import { expLevelProgress } from "@/config/td/hero-levels";
 import { heroCombatStats, type HeroSave } from "@/config/td/rpg";
@@ -57,6 +60,7 @@ export function TdHubMain({
   const points = Math.floor(farmPoints);
   const zone = fightMapId != null ? getZone(fightMapId) : null;
   const fightName = zone ? zoneName(zone, locale) : null;
+  const companion = companionHubFlags(save, gold);
   const tipKind = pickHubProgressTip({
     heroLevel: save.level,
     recommendLevel: zone?.recommendLevel ?? null,
@@ -65,8 +69,14 @@ export function TdHubMain({
     stamina,
     mapSweepUnlocked,
     clearedMaps: Math.max(0, save.worldMap - 1),
+    alliesInBattle: companion.alliesInBattle,
+    maxAllySlots: companion.maxAllySlots,
+    companionUpgradeable: companion.companionUpgradeable,
+    companionUnlockable: companion.companionUnlockable,
   });
   const tipText = t(`hubTip_${tipKind}` as "hubTip_pushFight");
+  const allyCount = alliesInBattle(save).length;
+  const allySlots = maxAllySlots(save.level);
 
   return (
     <section className="space-y-2">
@@ -108,6 +118,11 @@ export function TdHubMain({
                 >
                   {t("statPointsLeft", { n: save.statPoints })}
                 </button>
+              )}
+              {allySlots > 0 && (
+                <span className="text-violet-200/80">
+                  {t("companionDeployed", { count: allyCount, slots: allySlots })}
+                </span>
               )}
             </div>
 
