@@ -41,6 +41,7 @@ import {
   type UpgradeKind,
 } from "@/lib/td/rpg-storage";
 import {
+  ensureRpgSyncToken,
   mergeHeroWithCloud,
   queueHeroCloudUpload,
   toHeroCloudPayload,
@@ -768,12 +769,14 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
       return;
     }
     persistHero(preview.save, { upload: false });
+    const sessionToken = await ensureRpgSyncToken(address, sign);
     const cleared = await fastClearStaminaApi(
       address,
       sign,
       cost,
       preview.sceneWon,
       toHeroCloudPayload(preview.save, loadHeroUpdatedAt(walletKey) || Date.now()),
+      sessionToken,
     );
     setLoading(false);
     if (!cleared) {
@@ -821,7 +824,12 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
     if (!address) return;
     setLoading(true);
     setError(null);
-    const res = await startTdRunApi(address, 1, sign);
+    const res = await startTdRunApi(
+      address,
+      1,
+      sign,
+      await ensureRpgSyncToken(address, sign),
+    );
     setLoading(false);
     if (!res) {
       setError(t("startFailed"));
@@ -907,11 +915,13 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
       return;
     }
     persistHero(preview.save, { upload: false });
+    const sessionToken = await ensureRpgSyncToken(address, sign);
     const spent = await mapSweepStaminaApi(
       address,
       sign,
       runs,
       toHeroCloudPayload(preview.save, loadHeroUpdatedAt(walletKey) || Date.now()),
+      sessionToken,
     );
     setSweepLoading(false);
     if (!spent) {

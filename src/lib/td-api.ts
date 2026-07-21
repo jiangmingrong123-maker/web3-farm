@@ -56,6 +56,34 @@ async function signedPost<T>(
   }
 }
 
+/** 优先用 play session 令牌（免签）；失败再钱包签名 */
+async function sessionOrSignedPost<T extends { ok?: boolean }>(
+  wallet: string,
+  subpath: string,
+  action: string,
+  body: Record<string, unknown>,
+  sign: TdSignFn,
+  data: string | undefined,
+  sessionToken: string | null | undefined,
+): Promise<T | null> {
+  if (sessionToken) {
+    try {
+      const res = await fetch(`${API}/${wallet.toLowerCase()}/${subpath}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...body, syncToken: sessionToken }),
+      });
+      if (res.ok) {
+        const dataJson = (await res.json()) as T;
+        if (dataJson?.ok) return dataJson;
+      }
+    } catch {
+      /* fall through to signed */
+    }
+  }
+  return signedPost<T>(wallet, subpath, action, body, sign, data);
+}
+
 export async function fetchTdProfileApi(wallet: string): Promise<{
   profile: TdProfile;
   farmPoints: number;
@@ -113,13 +141,14 @@ export async function startTdRunApi(
   wallet: string,
   stage: number,
   sign: TdSignFn,
+  sessionToken?: string | null,
 ): Promise<{ profile: TdProfile; runId: string; finishToken: string } | null> {
-  const data = await signedPost<{
+  const data = await sessionOrSignedPost<{
     ok?: boolean;
     profile?: TdProfile;
     runId?: string;
     finishToken?: string;
-  }>(wallet, "start", "td-start", { stage }, sign, `stage=${stage}`);
+  }>(wallet, "start", "td-start", { stage }, sign, `stage=${stage}`, sessionToken);
   if (!data?.ok || !data.profile || !data.runId || !data.finishToken) return null;
   return {
     profile: data.profile,
@@ -246,8 +275,9 @@ export async function mapSweepStaminaApi(
   sign: TdSignFn,
   runs: number,
   hero?: HeroCloudPayload,
+  sessionToken?: string | null,
 ): Promise<TdProfile | null> {
-  const data = await signedPost<{ ok?: boolean; profile?: TdProfile }>(
+  const data = await sessionOrSignedPost<{ ok?: boolean; profile?: TdProfile }>(
     wallet,
     "map-sweep",
     "td-map-sweep",
@@ -259,6 +289,7 @@ export async function mapSweepStaminaApi(
     },
     sign,
     `runs=${runs}`,
+    sessionToken,
   );
   return data?.ok && data.profile ? data.profile : null;
 }
@@ -269,8 +300,9 @@ export async function fastClearStaminaApi(
   cost: number,
   sceneWon: boolean,
   hero?: HeroCloudPayload,
+  sessionToken?: string | null,
 ): Promise<{ profile: TdProfile; goldEarned: number } | null> {
-  const data = await signedPost<{
+  const data = await sessionOrSignedPost<{
     ok?: boolean;
     profile?: TdProfile;
     goldEarned?: number;
@@ -287,6 +319,7 @@ export async function fastClearStaminaApi(
     },
     sign,
     `cost=${cost}:won=${sceneWon ? 1 : 0}`,
+    sessionToken,
   );
   if (!data?.ok || !data.profile) return null;
   return { profile: data.profile, goldEarned: data.goldEarned ?? 0 };
@@ -300,7 +333,7 @@ export async function authTdRpgSyncApi(
     ok?: boolean;
     syncToken?: string;
     expiresAt?: number;
-  }>(wallet, "rpg-sync-auth", "td-rpg-sync-auth", {}, sign);
+  }>(wallet, "rpg-sync-auth", "td-play-session", {}, sign);
   if (!data?.ok || !data.syncToken || !data.expiresAt) return null;
   return { syncToken: data.syncToken, expiresAt: data.expiresAt };
 }

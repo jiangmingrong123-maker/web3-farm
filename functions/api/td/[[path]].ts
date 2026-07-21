@@ -5,8 +5,8 @@
  * POST /api/td/:wallet/start        — begin run, -5 stamina (signed)
  * POST /api/td/:wallet/finish       — settle run gold (signed); optional heroSave sync
  * POST /api/td/:wallet/shop-buy     — buy 24h buff (signed)
- * POST /api/td/:wallet/rpg-sync-auth — one-time signature → syncToken (7d)
- * POST /api/td/:wallet/rpg-save     — upload heroSave (syncToken or signature)
+ * POST /api/td/:wallet/rpg-sync-auth — one signature → 7d play session (battle + cloud save)
+ * POST /api/td/:wallet/rpg-save     — upload heroSave (session token or signature)
  */
 
 import { requireWalletSignature, type SignedBody } from "../../lib/farm-sign";
@@ -365,6 +365,18 @@ async function validateRpgSyncToken(
   return true;
 }
 
+/** 战斗/过图等：有 7 天 play session 令牌则免签名，否则仍要钱包签名 */
+async function requirePlayAuth(
+  env: Env,
+  wallet: string,
+  body: SignedBody & { syncToken?: string },
+  action: string,
+  data?: string,
+): Promise<Response | null> {
+  if (await validateRpgSyncToken(env, wallet, body.syncToken)) return null;
+  return requireWalletSignature(action, wallet, body, data);
+}
+
 function refillCost(profile: TdProfile): number {
   return REFILL_BASE_POINTS * 2 ** profile.refillCountToday;
 }
@@ -477,10 +489,10 @@ export const onRequest = async (context: {
   }
 
   if (path[1] === "start" && request.method === "POST") {
-    const body = await parseJson<SignedBody & { stage?: number }>(request);
+    const body = await parseJson<SignedBody & { stage?: number; syncToken?: string }>(request);
     if (!body) return new Response("Bad JSON", { status: 400 });
     const stage = Number(body.stage) || 1;
-    const auth = await requireWalletSignature("td-start", wallet, body, `stage=${stage}`);
+    const auth = await requirePlayAuth(env, wallet, body, "td-start", `stage=${stage}`);
     if (auth) return auth;
 
     let profile = await loadTd(env, wallet);
@@ -612,6 +624,7 @@ export const onRequest = async (context: {
       SignedBody & {
         cost?: number;
         sceneWon?: boolean;
+        syncToken?: string;
         heroSave?: unknown;
         heroUpdatedAt?: unknown;
       }
@@ -619,10 +632,11 @@ export const onRequest = async (context: {
     if (!body) return new Response("Bad JSON", { status: 400 });
     const cost = Math.max(1, Math.min(FAST_CLEAR_STAMINA_MAX, Number(body.cost) || 1));
     const sceneWon = !!body.sceneWon;
-    const auth = await requireWalletSignature(
-      "td-fast-clear",
+    const auth = await requirePlayAuth(
+      env,
       wallet,
       body,
+      "td-fast-clear",
       `cost=${cost}:won=${sceneWon ? 1 : 0}`,
     );
     if (auth) return auth;
@@ -658,11 +672,16 @@ export const onRequest = async (context: {
 
   if (path[1] === "map-sweep" && request.method === "POST") {
     const body = await parseJson<
-      SignedBody & { runs?: number; heroSave?: unknown; heroUpdatedAt?: unknown }
+      SignedBody & {
+        runs?: number;
+        syncToken?: string;
+        heroSave?: unknown;
+        heroUpdatedAt?: unknown;
+      }
     >(request);
     if (!body) return new Response("Bad JSON", { status: 400 });
     const runs = Math.max(1, Math.min(MAP_SWEEP_RUNS_MAX, Number(body.runs) || 1));
-    const auth = await requireWalletSignature("td-map-sweep", wallet, body, `runs=${runs}`);
+    const auth = await requirePlayAuth(env, wallet, body, "td-map-sweep", `runs=${runs}`);
     if (auth) return auth;
 
     let profile = await loadTd(env, wallet);
@@ -685,7 +704,11 @@ export const onRequest = async (context: {
   if (path[1] === "rpg-sync-auth" && request.method === "POST") {
     const body = await parseJson<SignedBody>(request);
     if (!body) return new Response("Bad JSON", { status: 400 });
-    const auth = await requireWalletSignature("td-rpg-sync-auth", wallet, body);
+    // 兼容旧签名文案；新客户端用 td-play-session
+    let auth = await requireWalletSignature("td-play-session", wallet, body);
+    if (auth) {
+      auth = await requireWalletSignature("td-rpg-sync-auth", wallet, body);
+    }
     if (auth) return auth;
 
     const token = crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
