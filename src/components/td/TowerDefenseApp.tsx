@@ -72,7 +72,7 @@ import {
 import { TdRpgClimb } from "@/components/td/TdRpgClimb";
 import { TdRpgHub } from "@/components/td/TdRpgHub";
 import { TdHubActionPanel } from "@/components/td/TdHubActionPanel";
-import { shopItem } from "@/config/td/shop";
+import { shopBuffLabel, shopItem } from "@/config/td/shop";
 import { executeMapSweep, type MapSweepMode } from "@/lib/td/map-sweep";
 import type { EquipRarity } from "@/config/td/equipment-catalog";
 import { loadSweepPrefs, saveSweepPrefs } from "@/lib/td/sweep-prefs";
@@ -1087,9 +1087,7 @@ export function TowerDefenseApp({ locale }: { locale: string }) {
   const isPowerWall = entryPlan != null && !entryPlan.fightMetrics.canWin;
   const fastClearCost =
     profile ? estimateFastClearStaminaCost(heroSave, locale, buffs) : 0;
-  const buffLabels = buffs
-    .map((id) => shopItem(id)?.name ?? id)
-    .filter(Boolean);
+  const buffLabels = buffs.map((id) => shopBuffLabel(id, locale));
 
   return (
     <div

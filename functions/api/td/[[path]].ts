@@ -28,16 +28,23 @@ const FAIL_CONSOLATION_GOLD = 3;
 const RPG_SYNC_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const RPG_HERO_MAX_BYTES = 200_000;
 
+/** 与 src/config/td/shop.ts SHOP_SERVER_PRICES 保持同步 */
 const SHOP: Record<string, { price: number; kind: "passive" | "active" }> = {
+  pack: { price: 45, kind: "passive" },
+  shield: { price: 50, kind: "passive" },
+  fury: { price: 55, kind: "passive" },
+  bond: { price: 60, kind: "passive" },
+  fortune: { price: 70, kind: "passive" },
+  insight: { price: 65, kind: "passive" },
+  nerf: { price: 35, kind: "active" },
+  freeze: { price: 40, kind: "active" },
+  heal: { price: 30, kind: "active" },
+  // legacy ids still purchasable / settleable
   notice: { price: 25, kind: "passive" },
   hot: { price: 40, kind: "passive" },
   promo: { price: 50, kind: "passive" },
   fan: { price: 35, kind: "passive" },
-  shield: { price: 45, kind: "passive" },
-  pack: { price: 60, kind: "passive" },
   buy_hype: { price: 15, kind: "active" },
-  freeze: { price: 25, kind: "active" },
-  nerf: { price: 30, kind: "active" },
 };
 
 function stageClearGold(stage: number): number {

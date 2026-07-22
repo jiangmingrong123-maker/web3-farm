@@ -1,4 +1,4 @@
-import { BUFF_DURATION_MS } from "@/config/td/shop";
+import { BUFF_DURATION_MS, SHOP_SERVER_PRICES } from "@/config/td/shop";
 import {
   FAIL_CONSOLATION_GOLD,
   GOLD_EXCHANGE_REWARD,
@@ -21,17 +21,7 @@ import {
   type UpgradeKind,
 } from "@/lib/td/rpg-storage";
 
-const SHOP: Record<string, { price: number; kind: "passive" | "active" }> = {
-  notice: { price: 25, kind: "passive" },
-  hot: { price: 40, kind: "passive" },
-  promo: { price: 50, kind: "passive" },
-  fan: { price: 35, kind: "passive" },
-  shield: { price: 45, kind: "passive" },
-  pack: { price: 60, kind: "passive" },
-  buy_hype: { price: 15, kind: "active" },
-  freeze: { price: 25, kind: "active" },
-  nerf: { price: 30, kind: "active" },
-};
+const SHOP = SHOP_SERVER_PRICES;
 
 function dayKey(now = Date.now()): string {
   return new Date(now).toISOString().slice(0, 10);

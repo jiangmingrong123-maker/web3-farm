@@ -6,6 +6,8 @@ import {
   SHOP_BUFF_ITEMS,
   SHOP_GEAR_ITEMS,
   SHOP_MATERIAL_ITEMS,
+  shopBuffLabel,
+  shopItemLocalized,
 } from "@/config/td/shop";
 import type { EquipRarity } from "@/config/td/equipment-catalog";
 import type { HeroSave } from "@/config/td/rpg";
@@ -113,7 +115,8 @@ export function TdRpgHub({
     .filter(([, n]) => n > 0)
     .map(([id, n]) => {
       const shopMat = SHOP_MATERIAL_ITEMS.find((m) => m.materialId === id);
-      return `${shopMat?.name ?? id}×${n}`;
+      const label = shopMat ? shopItemLocalized(shopMat, locale).name : id;
+      return `${label}×${n}`;
     })
     .join(" · ");
 
@@ -174,14 +177,13 @@ export function TdRpgHub({
                 </p>
                 <div className="flex flex-wrap gap-1.5">
                   {buffIds.map((id) => {
-                    const item = SHOP_BUFF_ITEMS.find((i) => i.id === id);
                     const exp = buffExpiry[id] ?? 0;
                     return (
                       <span
                         key={id}
                         className="rounded-full border border-gold/30 bg-gold/10 px-2 py-0.5 text-[10px] text-gold"
                       >
-                        {item?.name ?? id} · {formatBuffExpiry(Math.max(0, exp - Date.now()))}
+                        {shopBuffLabel(id, locale)} · {formatBuffExpiry(Math.max(0, exp - Date.now()))}
                       </span>
                     );
                   })}
@@ -199,7 +201,8 @@ export function TdRpgHub({
                   onBuy={onBuyShop}
                 />
               ) : (
-                (shopTab === "buff" ? SHOP_BUFF_ITEMS : SHOP_MATERIAL_ITEMS).map((item) => {
+                (shopTab === "buff" ? SHOP_BUFF_ITEMS : SHOP_MATERIAL_ITEMS).map((raw) => {
+                const item = shopItemLocalized(raw, locale);
                 const active = buffIds.includes(item.id);
                 const canBuy = gold >= item.price && !loading;
                 return (

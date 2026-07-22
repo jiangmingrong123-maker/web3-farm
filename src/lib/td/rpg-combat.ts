@@ -123,7 +123,20 @@ export function simulateSceneBattle(
   party[0]!.name = heroName;
 
   let enemies = buildSceneEncounter(mapId, scene).map((e) => ({ ...e }));
+  if (buffs.includes("nerf")) {
+    enemies = enemies.map((e) => {
+      const hp = Math.max(1, Math.floor(e.hp * 0.8));
+      return { ...e, hp, maxHp: hp };
+    });
+  }
   let shieldUsed = false;
+  let healUsed = false;
+  const hasFury = buffs.includes("fury") || buffs.includes("hot");
+  const hasBond = buffs.includes("bond") || buffs.includes("fan");
+  const hasFreeze = buffs.includes("freeze");
+  const hasHeal = buffs.includes("heal") || buffs.includes("buy_hype");
+  const hasFortune = buffs.includes("fortune");
+  const hasInsight = buffs.includes("insight") || buffs.includes("promo");
   const detail: string[] = [];
   const push = (line: string) => detail.push(line);
 
@@ -176,7 +189,8 @@ export function simulateSceneBattle(
         const physSkill = pickHeroPhysSkill(save.protagonistId);
         const physName = skillName(physSkill, locale);
         let physDmg = Math.max(1, unit.atk - Math.floor(target.atk * 0.05));
-        const crit = Math.random() < 0.12;
+        const critChance = 0.12 + (hasFury ? 0.12 : 0);
+        const crit = Math.random() < critChance;
         if (crit) physDmg = Math.round(physDmg * 1.5);
         target.hp = Math.round((target.hp - physDmg) * 10) / 10;
         push(
@@ -204,7 +218,9 @@ export function simulateSceneBattle(
         }
       } else {
         let dmg = Math.max(1, unit.atk - Math.floor(target.atk * 0.08));
-        const crit = Math.random() < 0.08;
+        if (hasBond) dmg = Math.round(dmg * 1.25);
+        const critChance = 0.08 + (hasFury ? 0.12 : 0);
+        const crit = Math.random() < critChance;
         if (crit) dmg = Math.round(dmg * 1.4);
         target.hp = Math.round((target.hp - dmg) * 10) / 10;
         push(allyAttackLine(unit, target, dmg, crit, locale));
@@ -223,6 +239,14 @@ export function simulateSceneBattle(
 
     for (const enemy of enemies) {
       if (livingParty(party).length === 0) break;
+      if (hasFreeze && round === 1) {
+        push(
+          zh
+            ? `【定身符】【${enemy.name}】本回合无法行动`
+            : `[Stun] [${enemy.name}] skips this round`,
+        );
+        continue;
+      }
       const victim = pickRandomTarget(party)!;
       const eSkill = pickEnemySkill(enemy.name, !!enemy.isBoss);
       const eSkillName = skillName(eSkill, locale);
@@ -230,7 +254,7 @@ export function simulateSceneBattle(
       if (Math.random() * 100 < victim.dodge) {
         push(
           zh
-            ? `【${victim.name}】闪避【${enemy.name}」的「${eSkillName}」`
+            ? `【${victim.name}】闪避【${enemy.name}】的「${eSkillName}」`
             : `[${victim.name}] dodged [${enemy.name}] ${eSkillName}`,
         );
         continue;
@@ -240,8 +264,8 @@ export function simulateSceneBattle(
         shieldUsed = true;
         push(
           zh
-            ? `【${heroName}】「护体」抵挡【${enemy.name}」的「${eSkillName}」`
-            : `[${heroName}] blocked [${enemy.name}] ${eSkillName}`,
+            ? `【${heroName}】「护体符」抵挡【${enemy.name}】的「${eSkillName}」`
+            : `[${heroName}] Ward blocked [${enemy.name}] ${eSkillName}`,
         );
         continue;
       }
@@ -255,6 +279,24 @@ export function simulateSceneBattle(
           ? `【${enemy.name}】「${eSkillName}」→ ${victim.name}，${taken} 伤害（${Math.max(0, victim.hp)}/${victim.maxHp}）`
           : `[${enemy.name}] ${eSkillName} → ${victim.name}, ${taken} DMG (${Math.max(0, victim.hp)}/${victim.maxHp} HP)`,
       );
+
+      if (
+        victim.isHero &&
+        hasHeal &&
+        !healUsed &&
+        victim.hp > 0 &&
+        victim.hp / victim.maxHp < 0.35
+      ) {
+        healUsed = true;
+        const healed = Math.floor(victim.maxHp * 0.4);
+        victim.hp = Math.min(victim.maxHp, victim.hp + healed);
+        push(
+          zh
+            ? `【${heroName}】服下「急救丹」，回复 ${healed} 气血（${victim.hp}/${victim.maxHp}）`
+            : `[${heroName}] Emergency Pill +${healed} HP (${victim.hp}/${victim.maxHp})`,
+        );
+      }
+
       if (victim.hp <= 0) {
         push(
           zh
@@ -272,10 +314,13 @@ export function simulateSceneBattle(
   const summary: string[] = [];
 
   if (sceneWon && zone) {
-    const expGain = sceneExp(zone.exp, mapId, scene);
+    let expGain = sceneExp(zone.exp, mapId, scene);
+    if (hasInsight) expGain = Math.floor(expGain * 1.3);
     runExp = expGain;
-    const rollLoot =
-      isBoss || Math.random() < normalSceneLootChance(mapId);
+    const lootChance = hasFortune
+      ? Math.min(0.95, normalSceneLootChance(mapId) * 2.5 + 0.15)
+      : normalSceneLootChance(mapId);
+    const rollLoot = isBoss || Math.random() < lootChance;
     if (rollLoot) {
       const loot = rollZoneLoot(mapId, save.level);
       if (loot) {

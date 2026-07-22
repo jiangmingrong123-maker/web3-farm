@@ -94,9 +94,9 @@ export function buildBattleParty(
   const combat = heroCombatStats(s);
   let heroAtk = combat.atk;
   let heroHp = combat.maxHp;
-  if (buffs.includes("pack")) {
-    heroAtk += 2;
-    heroHp += 10;
+  if (buffs.includes("pack") || buffs.includes("notice")) {
+    heroAtk += 12;
+    heroHp += 12;
   }
 
   const party: BattleAlly[] = [
@@ -130,13 +130,16 @@ export function buildBattleParty(
           hit: 5,
         };
 
+    let atk = stats.atk;
+    if (buffs.includes("pack") || buffs.includes("notice")) atk += 8;
+
     party.push({
       id: `ally_${k}`,
       kind: k,
       name: allyName(k, locale),
       hp: stats.hp,
       maxHp: stats.hp,
-      atk: stats.atk,
+      atk,
       mag: stats.mag,
       def: stats.def,
       dodge: 3 + lv + Math.floor(stats.hit / 4),

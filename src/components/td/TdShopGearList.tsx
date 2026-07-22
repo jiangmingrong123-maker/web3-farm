@@ -6,6 +6,7 @@ import { maxEquipLevelForHero } from "@/config/td/hero-levels";
 import type { HeroSave } from "@/config/td/rpg";
 import { EquipDetailSheet } from "@/components/td/TdEquipInfo";
 import type { ShopItemDef } from "@/config/td/shop";
+import { shopItemLocalized } from "@/config/td/shop";
 
 type Props = {
   items: ShopItemDef[];
@@ -22,7 +23,8 @@ export function TdShopGearList({ items, save, locale, gold, loading, onBuy }: Pr
 
   return (
     <div className="space-y-3">
-      {items.map((shopItem) => {
+      {items.map((raw) => {
+        const shopItem = shopItemLocalized(raw, locale);
         const gear = shopItem.gearId ? getEquipItem(shopItem.gearId) : null;
         if (!gear) return null;
         const wornId = save.equipped[gear.slot];

@@ -379,7 +379,7 @@
     "climbStart": "Challenge floor 1",
     "climbNext": "Challenge floor {floor}",
     "climbLogEmpty": "Tap Next battle to fight one scene at a time",
-    "shopHint": "Spend gold on 24h buffs — expired buffs disappear",
+    "shopHint": "Buffs for climb & pets: power, EXP, loot; gear & mats for gold",
     "buffActive": "Active",
     "buy": "Buy",
     "wave": "Wave",
