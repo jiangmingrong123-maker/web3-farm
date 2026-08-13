@@ -1,0 +1,201 @@
+{
+  "sections": {
+    "hero_banner": {
+      "type": "image-banner",
+      "blocks": {
+        "heading": {
+          "type": "heading",
+          "settings": {
+            "heading": "宜兴紫砂 · 张洪明工作室",
+            "heading_size": "h0"
+          }
+        },
+        "text": {
+          "type": "text",
+          "settings": {
+            "text": "手工紫砂壶，宜兴直发，香港及全球配送",
+            "text_style": "subtitle"
+          }
+        },
+        "button": {
+          "type": "buttons",
+          "settings": {
+            "button_label_1": "浏览全部商品",
+            "button_link_1": "shopify://collections/all",
+            "button_style_secondary_1": false,
+            "button_label_2": "大师臻品",
+            "button_link_2": "shopify://collections/zhang-hongming-master",
+            "button_style_secondary_2": true
+          }
+        }
+      },
+      "block_order": ["heading", "text", "button"],
+      "settings": {
+        "image_overlay_opacity": 30,
+        "image_height": "large",
+        "desktop_content_position": "middle-center",
+        "show_text_box": true,
+        "image_behavior": "none",
+        "desktop_content_alignment": "center",
+        "color_scheme": "scheme-3",
+        "mobile_content_alignment": "center",
+        "stack_images_on_mobile": false,
+        "show_text_below": false
+      }
+    },
+    "intro": {
+      "type": "rich-text",
+      "blocks": {
+        "heading": {
+          "type": "heading",
+          "settings": {
+            "heading": "Authentic Yixing Zisha Teapots",
+            "heading_size": "h1"
+          }
+        },
+        "text": {
+          "type": "text",
+          "settings": {
+            "text": "<p>正高级工艺美术师<strong>张洪明</strong>及家族匠人手工制作。每一把壶均从<strong>江苏宜兴</strong>直发，支持香港、东南亚、欧美配送。</p><p>Master <strong>Zhang Hongming</strong> (Senior Arts &amp; Crafts Artist) and family artisans craft each teapot in <strong>Yixing, Jiangsu</strong>. Shipped worldwide with care.</p>"
+          }
+        },
+        "button": {
+          "type": "button",
+          "settings": {
+            "button_label": "About us",
+            "button_link": "shopify://pages/about-us",
+            "button_style_secondary": true
+          }
+        }
+      },
+      "block_order": ["heading", "text", "button"],
+      "settings": {
+        "desktop_content_position": "center",
+        "content_alignment": "center",
+        "color_scheme": "scheme-1",
+        "full_width": true,
+        "padding_top": 40,
+        "padding_bottom": 40
+      }
+    },
+    "featured_master": {
+      "type": "featured-collection",
+      "settings": {
+        "title": "大师臻品 · Master Collection",
+        "heading_size": "h1",
+        "description": "<p>张洪明全手工代表作</p>",
+        "show_description": true,
+        "description_style": "body",
+        "collection": "zhang-hongming-master",
+        "products_to_show": 4,
+        "columns_desktop": 4,
+        "color_scheme": "scheme-1",
+        "full_width": false,
+        "show_view_all": true,
+        "view_all_style": "solid",
+        "enable_desktop_slider": false,
+        "swipe_on_mobile": true,
+        "image_ratio": "square",
+        "image_shape": "default",
+        "show_secondary_image": true,
+        "show_vendor": false,
+        "show_rating": false,
+        "quick_add": "none",
+        "columns_mobile": "2",
+        "padding_top": 36,
+        "padding_bottom": 36
+      }
+    },
+    "artisans": {
+      "type": "multicolumn",
+      "blocks": {
+        "col_zhm": {
+          "type": "column",
+          "settings": {
+            "title": "张洪明 Zhang Hongming",
+            "text": "<p>正高级工艺美术师，宜兴紫砂全手工代表人物。代表作包括掇球、仿古、雪华壶等系列。</p>",
+            "link_label": "查看作品",
+            "link": "shopify://collections/zhang-hongming-master"
+          }
+        },
+        "col_yjy": {
+          "type": "column",
+          "settings": {
+            "title": "杨俊英 Yang Junying",
+            "text": "<p>家族传承人，擅长仿古、莲子等经典器型，泥料考究，做工精湛。</p>",
+            "link_label": "查看作品",
+            "link": "shopify://collections/yang-junying"
+          }
+        },
+        "col_yjh": {
+          "type": "column",
+          "settings": {
+            "title": "郁佳骅 Yu Jiahua",
+            "text": "<p>青年匠人，精工半手系列，性价比高，适合日常品茗与入门收藏。</p>",
+            "link_label": "查看作品",
+            "link": "shopify://collections/yu-jiahua"
+          }
+        },
+        "col_zzy": {
+          "type": "column",
+          "settings": {
+            "title": "张赵阳 Zhang Zhaoyang",
+            "text": "<p>工作室匠人，负责选泥、烧制与发货，确保每一把壶品质如一。</p>",
+            "link_label": "查看作品",
+            "link": "shopify://collections/zhang-zhaoyang"
+          }
+        }
+      },
+      "block_order": ["col_zhm", "col_yjy", "col_yjh", "col_zzy"],
+      "settings": {
+        "title": "匠人风采 · Our Artisans",
+        "heading_size": "h1",
+        "image_width": "full",
+        "image_ratio": "adapt",
+        "columns_desktop": 4,
+        "column_alignment": "left",
+        "background_style": "none",
+        "color_scheme": "scheme-2",
+        "columns_mobile": "1",
+        "swipe_on_mobile": true,
+        "padding_top": 36,
+        "padding_bottom": 36
+      }
+    },
+    "all_products": {
+      "type": "featured-collection",
+      "settings": {
+        "title": "全部商品 · All Teapots",
+        "heading_size": "h2",
+        "description": "",
+        "show_description": false,
+        "description_style": "body",
+        "collection": "all",
+        "products_to_show": 8,
+        "columns_desktop": 4,
+        "color_scheme": "scheme-1",
+        "full_width": false,
+        "show_view_all": true,
+        "view_all_style": "solid",
+        "enable_desktop_slider": false,
+        "swipe_on_mobile": false,
+        "image_ratio": "adapt",
+        "image_shape": "default",
+        "show_secondary_image": true,
+        "show_vendor": false,
+        "show_rating": false,
+        "quick_add": "none",
+        "columns_mobile": "2",
+        "padding_top": 36,
+        "padding_bottom": 52
+      }
+    }
+  },
+  "order": [
+    "hero_banner",
+    "intro",
+    "featured_master",
+    "artisans",
+    "all_products"
+  ]
+}

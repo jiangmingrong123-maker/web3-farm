@@ -1,0 +1,152 @@
+{
+  "store": {
+    "handle": "zhang-hongming-zisha-studio",
+    "name_en": "Zhang Hongming Zisha Studio",
+    "name_zh": "张洪明紫砂工作室"
+  },
+  "hero": {
+    "heading": "宜兴紫砂 · 张洪明工作室",
+    "subheading": "手工紫砂壶，宜兴直发，香港及全球配送",
+    "heading_en": "Yixing Zisha · Zhang Hongming Studio",
+    "subheading_en": "Handmade teapots shipped from Yixing to Hong Kong and worldwide",
+    "button_label": "浏览全部商品",
+    "button_label_en": "Browse all products",
+    "button_link": "shopify://collections/all"
+  },
+  "intro": {
+    "heading": "Authentic Yixing Zisha Teapots",
+    "text": "<p>正高级工艺美术师<strong>张洪明</strong>及家族匠人手工制作。每一把壶均从<strong>江苏宜兴</strong>直发，支持香港、东南亚、欧美配送。</p><p>Master <strong>Zhang Hongming</strong> (Senior Arts &amp; Crafts Artist) and family artisans craft each teapot in <strong>Yixing, Jiangsu</strong>. Shipped worldwide with care.</p>",
+    "button_label": "了解我们",
+    "button_label_en": "About us",
+    "button_link": "/pages/about-us"
+  },
+  "featured_collection": {
+    "title": "大师臻品 · Master Collection",
+    "description": "张洪明全手工代表作",
+    "handle": "zhang-hongming-master",
+    "products_to_show": 4
+  },
+  "artisans": {
+    "title": "匠人风采 · Our Artisans",
+    "columns": [
+      {
+        "title": "张洪明 Zhang Hongming",
+        "text": "<p>正高级工艺美术师，宜兴紫砂全手工代表人物。代表作包括掇球、仿古、雪华壶等系列。</p>",
+        "link_label": "查看作品",
+        "collection_handle": "zhang-hongming-master"
+      },
+      {
+        "title": "杨俊英 Yang Junying",
+        "text": "<p>家族传承人，擅长仿古、莲子等经典器型，泥料考究，做工精湛。</p>",
+        "link_label": "查看作品",
+        "collection_handle": "yang-junying"
+      },
+      {
+        "title": "郁佳骅 Yu Jiahua",
+        "text": "<p>青年匠人，精工半手系列，性价比高，适合日常品茗与入门收藏。</p>",
+        "link_label": "查看作品",
+        "collection_handle": "yu-jiahua"
+      },
+      {
+        "title": "张赵阳 Zhang Zhaoyang",
+        "text": "<p>工作室匠人，负责选泥、烧制与发货，确保每一把壶品质如一。</p>",
+        "link_label": "查看作品",
+        "collection_handle": "zhang-zhaoyang"
+      }
+    ]
+  },
+  "browse_collections": {
+    "title": "按匠人浏览 · Shop by Artisan",
+    "collection_handles": [
+      "zhang-hongming-master",
+      "yang-junying",
+      "yu-jiahua",
+      "zhang-zhaoyang"
+    ]
+  },
+  "all_products": {
+    "title": "全部商品 · All Teapots",
+    "products_to_show": 8
+  },
+  "about_page": {
+    "title": "About Us",
+    "handle": "about-us",
+    "body_html": "<h2>Zhang Hongming Zisha Studio</h2><p><strong>Zhang Hongming</strong> is a Senior Arts &amp; Crafts Artist in Yixing, the birthplace of zisha (purple clay) teapots. Together with <strong>Yang Junying</strong>, <strong>Yu Jiahua</strong>, and <strong>Zhang Zhaoyang</strong>, our studio crafts teapots by hand — from clay selection and shaping to firing in traditional kilns.</p><h3>Why buy from us</h3><ul><li><strong>Authentic Yixing zisha</strong> — real purple clay, not chemical blends</li><li><strong>Shipped from Yixing</strong> — direct from our workshop in Jiangsu, China</li><li><strong>Worldwide delivery</strong> — Hong Kong, Southeast Asia, US, and Europe</li><li><strong>Each piece is unique</strong> — inventory of one per listing</li></ul><h3>关于我们</h3><p><strong>张洪明</strong>，正高级工艺美术师，宜兴紫砂全手工制作。家族匠人<strong>杨俊英</strong>、<strong>郁佳骅</strong>、<strong>张赵阳</strong>共同参与选泥、制作、烧制与质检。</p><p>每一把壶从江苏宜兴直发，支持 PayPal 付款，香港及全球配送。</p><h3>Contact</h3><p>Orders &amp; enquiries: <a href=\"mailto:jiangmingrong123@gmail.com\">jiangmingrong123@gmail.com</a></p><p>Yixing workshop support: <a href=\"mailto:526825684@qq.com\">526825684@qq.com</a></p>"
+  },
+  "collections": [
+    {
+      "title": "Zhang Hongming Master",
+      "handle": "zhang-hongming-master",
+      "body_html": "<p>Full-hand teapots by Senior Artist Zhang Hongming. 张洪明全手工大师系列。</p>",
+      "rules": [
+        {
+          "column": "title",
+          "relation": "contains",
+          "condition": "Zhang Hongming"
+        }
+      ]
+    },
+    {
+      "title": "Yang Junying",
+      "handle": "yang-junying",
+      "body_html": "<p>Teapots by Yang Junying. 杨俊英作品。</p>",
+      "rules": [
+        {
+          "column": "title",
+          "relation": "contains",
+          "condition": "Yang Junying"
+        }
+      ]
+    },
+    {
+      "title": "Yu Jiahua",
+      "handle": "yu-jiahua",
+      "body_html": "<p>Semi-handcrafted teapots by Yu Jiahua. 郁佳骅精工半手系列。</p>",
+      "rules": [
+        {
+          "column": "title",
+          "relation": "contains",
+          "condition": "Yu Jiahua"
+        }
+      ]
+    },
+    {
+      "title": "Zhang Zhaoyang",
+      "handle": "zhang-zhaoyang",
+      "body_html": "<p>Teapots by Zhang Zhaoyang. 张赵阳作品。</p>",
+      "rules": [
+        {
+          "column": "title",
+          "relation": "contains",
+          "condition": "Zhang Zhaoyang"
+        }
+      ]
+    }
+  ],
+  "navigation": {
+    "title": "Main menu",
+    "handle": "main-menu",
+    "items": [
+      {
+        "title": "Home",
+        "url": "/"
+      },
+      {
+        "title": "All Products",
+        "url": "/collections/all"
+      },
+      {
+        "title": "Master Collection",
+        "url": "/collections/zhang-hongming-master"
+      },
+      {
+        "title": "About Us",
+        "url": "/pages/about-us"
+      },
+      {
+        "title": "Contact",
+        "url": "/policies/contact-information"
+      }
+    ]
+  }
+}
